@@ -1,0 +1,34 @@
+<launch>
+    <!-- Frontend cloud params -->
+    <arg name="frontend_decimation" default="2"/>
+    <arg name="frontend_voxel_size" default="0.05"/>
+    <arg name="frontend_max_depth" default="15.0"/>
+
+    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen">
+        <param name="max_valid_depth" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf" 
+          args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
+
+    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
+
+    <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb" 
+          args="load rtabmap_util/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
+        
+        <remap from="rgb/image"       to="/airsim/rgb"/>
+        <remap from="depth/image"     to="/airsim/depth"/>
+        <remap from="rgb/camera_info" to="/airsim/camera_info"/>
+        
+        <remap from="cloud"           to="/airsim/point_cloud"/>
+
+        <param name="decimation" type="int" value="$(arg frontend_decimation)"/> 
+        <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
+        <param name="max_depth"  type="double" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+
+    <!-- <node pkg="active_mapping" type="custom_teleop.py" name="custom_teleop" output="screen" /> -->
+
+</launch>

@@ -1,0 +1,95 @@
+<launch>
+    <!-- Unified tunables -->
+    <arg name="map_type" default="pointcloud"/>
+    <arg name="global_frame_id" default="world"/>
+    <arg name="publish_freq" default="10.0"/>
+    <arg name="max_queue_size" default="3"/>
+    <arg name="publish_only_on_update" default="true"/>
+
+    <!-- Frontend cloud params -->
+    <arg name="frontend_decimation" default="2"/>
+    <arg name="frontend_voxel_size" default="0.05"/>
+    <arg name="frontend_max_depth" default="15.0"/>
+
+    <!-- Backend pre-filter params -->
+    <arg name="enable_backend_voxel_filter" default="true"/>
+    <arg name="backend_downsample_size" default="0.05"/>
+    <arg name="backend_max_depth" default="20.0"/>
+    <arg name="ikd_tree_downsample" default="true"/>
+
+    <!-- Pointcloud mode params -->
+    <arg name="compute_normals" default="false"/>
+    <arg name="knn_k" default="15"/>
+    <arg name="w_geom" default="0.4"/>
+    <arg name="w_color" default="0.3"/>
+    <arg name="w_sparse" default="0.3"/>
+    <arg name="publish_geom_map" default="true"/>
+    <arg name="publish_color_map" default="true"/>
+
+    <!-- Surfel mode params -->
+    <arg name="surfel_radius" default="0.10"/>
+    <arg name="depth_tolerance" default="0.05"/>
+
+    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen" />
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf" 
+          args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
+
+    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
+
+    <!-- 点云密度更高，适合用来做纹理商分析 -->
+    <!-- <node pkg="nodelet" type="nodelet" name="depth_to_cloud_official" 
+          args="load depth_image_proc/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
+        
+        <remap from="rgb/camera_info"             to="/airsim/camera_info"/>
+        <remap from="rgb/image_rect_color"        to="/airsim/rgb"/>
+        <remap from="depth_registered/image_rect" to="/airsim/depth"/>
+        <remap from="depth_registered/points"     to="/airsim/point_cloud"/>
+    </node> -->
+
+    <!-- 点云密度略低,可以给fuel来执行探索任务 -->
+    <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb" 
+          args="load rtabmap_util/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
+        
+        <remap from="rgb/image"       to="/airsim/rgb"/>
+        <remap from="depth/image"     to="/airsim/depth"/>
+        <remap from="rgb/camera_info" to="/airsim/camera_info"/>
+        
+        <remap from="cloud"           to="/airsim/point_cloud"/>
+
+        <param name="decimation" type="int" value="$(arg frontend_decimation)"/> 
+        <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
+        <param name="max_depth"  type="double" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="active_mapping" type="active_mapping_node" name="active_mapping_backend" output="screen">
+        <!-- 点云建图 -->
+        <param name="map_type"        value="$(arg map_type)" />
+        <param name="global_frame_id" value="$(arg global_frame_id)" />
+        <param name="publish_freq"    value="$(arg publish_freq)" />
+        <param name="max_queue_size"  value="$(arg max_queue_size)" />
+        <param name="publish_only_on_update" value="$(arg publish_only_on_update)" />
+        
+        <param name="enable_backend_voxel_filter" value="$(arg enable_backend_voxel_filter)" />
+        <param name="downsample_size" value="$(arg backend_downsample_size)" />
+        <param name="max_depth"       value="$(arg backend_max_depth)" />
+        <param name="ikd_tree_downsample" value="$(arg ikd_tree_downsample)" />
+        <param name="compute_normals" value="$(arg compute_normals)" />
+        <param name="knn_k"           value="$(arg knn_k)" />
+        <param name="publish_geom_map" value="$(arg publish_geom_map)" />
+        <param name="publish_color_map" value="$(arg publish_color_map)" />
+        
+        <param name="w_geom"          value="$(arg w_geom)" />
+        <param name="w_color"         value="$(arg w_color)" />
+        <param name="w_sparse"        value="$(arg w_sparse)" />
+
+        <!-- 面元地图参数（map_type=surfel 时生效） -->
+        <param name="surfel_radius" value="$(arg surfel_radius)" /> 
+        <param name="depth_tolerance" value="$(arg depth_tolerance)" />
+    </node>
+
+    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+
+    <!-- <node pkg="active_mapping" type="custom_teleop.py" name="custom_teleop" output="screen" /> -->
+
+</launch>
