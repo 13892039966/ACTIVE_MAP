@@ -27,11 +27,15 @@ class AirSimTeleop:
         r = R.from_quat([q.x_val, q.y_val, q.z_val, q.w_val])
         euler = r.as_euler('zyx') 
         self.yaw = euler[0]
-        # 🌟 记录初始的 Pitch 角
         self.pitch = euler[1]
+        self.roll = euler[2]
+        self.init_yaw = self.yaw
+        self.init_pitch = self.pitch
+        self.init_roll = self.roll
         
         # 初始化所有速度变量
         self.vx = self.vy = self.vz = self.vyaw = self.vpitch = 0.0
+        self.reset_attitude_requested = False
         
         rospy.Subscriber('/cmd_vel', Twist, self.cmd_callback)
         rospy.loginfo("🎮 AirSim Teleop 驱动已就绪 (支持 6DoF 飞行)！")
@@ -54,12 +58,29 @@ class AirSimTeleop:
         raise rospy.ROSInterruptException("ROS shutdown before AirSim teleop connected")
 
     def cmd_callback(self, msg):
+        if msg.angular.x > 0.5:
+            self.reset_attitude_requested = True
+            return
         self.vx = msg.linear.x      
         self.vy = msg.linear.y      
         self.vz = msg.linear.z      
         self.vyaw = msg.angular.z   
         # 🌟 接收 Pitch 速度指令
         self.vpitch = msg.angular.y 
+
+    def publish_current_pose(self):
+        pose = airsim.Pose()
+        pose.position.x_val = self.x
+        pose.position.y_val = self.y
+        pose.position.z_val = self.z
+
+        q = R.from_euler('zyx', [self.yaw, self.pitch, self.roll]).as_quat()
+        pose.orientation.x_val = q[0]
+        pose.orientation.y_val = q[1]
+        pose.orientation.z_val = q[2]
+        pose.orientation.w_val = q[3]
+
+        self.client.simSetVehiclePose(pose, True)
 
     def run(self):
         rate = rospy.Rate(30)
@@ -69,6 +90,13 @@ class AirSimTeleop:
         max_pitch = math.radians(85)
         
         while not rospy.is_shutdown():
+            if self.reset_attitude_requested:
+                self.yaw = self.init_yaw
+                self.pitch = self.init_pitch
+                self.roll = self.init_roll
+                self.reset_attitude_requested = False
+                self.publish_current_pose()
+
             if self.vx != 0 or self.vy != 0 or self.vz != 0 or self.vyaw != 0 or self.vpitch != 0:
                 v_forward = self.vx
                 v_right = -self.vy
@@ -90,19 +118,7 @@ class AirSimTeleop:
                 self.y += (v_forward * math.sin(self.yaw) + v_right * math.cos(self.yaw)) * dt
                 self.z += v_down * dt
                 
-                pose = airsim.Pose()
-                pose.position.x_val = self.x
-                pose.position.y_val = self.y
-                pose.position.z_val = self.z
-                
-                # 🌟 重新打包带有 Pitch 的四元数 (ZYX 顺序：Yaw, Pitch, Roll)
-                q = R.from_euler('zyx', [self.yaw, self.pitch, 0.0]).as_quat()
-                pose.orientation.x_val = q[0]
-                pose.orientation.y_val = q[1]
-                pose.orientation.z_val = q[2]
-                pose.orientation.w_val = q[3]
-                
-                self.client.simSetVehiclePose(pose, True)
+                self.publish_current_pose()
                 
             rate.sleep()
 

@@ -1,0 +1,40 @@
+<launch>
+    <!-- Lightweight pointcloud configuration that trades map density for smoother runtime. -->
+    <arg name="frontend_decimation" default="6"/>
+    <arg name="frontend_voxel_size" default="0.10"/>
+    <arg name="frontend_max_depth" default="15.0"/>
+
+    <arg name="enable_backend_voxel_filter" default="true"/>
+    <arg name="backend_downsample_size" default="0.12"/>
+    <arg name="backend_max_depth" default="15.0"/>
+    <arg name="ikd_tree_downsample" default="true"/>
+
+    <arg name="publish_freq" default="5.0"/>
+    <arg name="publish_only_on_update" default="false"/>
+    <arg name="knn_k" default="8"/>
+    <arg name="compute_normals" default="false"/>
+    <arg name="w_geom" default="0.4"/>
+    <arg name="w_color" default="0.3"/>
+    <arg name="w_sparse" default="0.3"/>
+
+    <include file="$(find active_mapping)/launch/airsim_mapping.launch">
+        <arg name="map_type" value="pointcloud"/>
+        <arg name="publish_freq" value="$(arg publish_freq)"/>
+        <arg name="publish_only_on_update" value="$(arg publish_only_on_update)"/>
+
+        <arg name="frontend_decimation" value="$(arg frontend_decimation)"/>
+        <arg name="frontend_voxel_size" value="$(arg frontend_voxel_size)"/>
+        <arg name="frontend_max_depth" value="$(arg frontend_max_depth)"/>
+
+        <arg name="enable_backend_voxel_filter" value="$(arg enable_backend_voxel_filter)"/>
+        <arg name="backend_downsample_size" value="$(arg backend_downsample_size)"/>
+        <arg name="backend_max_depth" value="$(arg backend_max_depth)"/>
+        <arg name="ikd_tree_downsample" value="$(arg ikd_tree_downsample)"/>
+
+        <arg name="compute_normals" value="$(arg compute_normals)"/>
+        <arg name="knn_k" value="$(arg knn_k)"/>
+        <arg name="w_geom" value="$(arg w_geom)"/>
+        <arg name="w_color" value="$(arg w_color)"/>
+        <arg name="w_sparse" value="$(arg w_sparse)"/>
+    </include>
+</launch>

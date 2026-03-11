@@ -1,0 +1,38 @@
+<launch>
+    <!-- Wrapper for evaluating the surfel backend without changing the default pointcloud launch. -->
+    <arg name="frontend_decimation" default="4"/>
+    <arg name="frontend_voxel_size" default="0.08"/>
+    <arg name="frontend_max_depth" default="12.0"/>
+
+    <arg name="enable_backend_voxel_filter" default="true"/>
+    <arg name="backend_downsample_size" default="0.08"/>
+    <arg name="backend_max_depth" default="12.0"/>
+    <arg name="ikd_tree_downsample" default="true"/>
+
+    <arg name="publish_freq" default="5.0"/>
+    <arg name="surfel_radius" default="0.12"/>
+    <arg name="depth_tolerance" default="0.04"/>
+    <arg name="init_pca_k" default="12"/>
+    <arg name="w_geom" default="0.6"/>
+    <arg name="w_hole" default="0.4"/>
+
+    <include file="$(find active_mapping)/launch/airsim_mapping.launch">
+        <arg name="map_type" value="surfel"/>
+        <arg name="publish_freq" value="$(arg publish_freq)"/>
+
+        <arg name="frontend_decimation" value="$(arg frontend_decimation)"/>
+        <arg name="frontend_voxel_size" value="$(arg frontend_voxel_size)"/>
+        <arg name="frontend_max_depth" value="$(arg frontend_max_depth)"/>
+
+        <arg name="enable_backend_voxel_filter" value="$(arg enable_backend_voxel_filter)"/>
+        <arg name="backend_downsample_size" value="$(arg backend_downsample_size)"/>
+        <arg name="backend_max_depth" value="$(arg backend_max_depth)"/>
+        <arg name="ikd_tree_downsample" value="$(arg ikd_tree_downsample)"/>
+
+        <arg name="surfel_radius" value="$(arg surfel_radius)"/>
+        <arg name="depth_tolerance" value="$(arg depth_tolerance)"/>
+        <arg name="init_pca_k" value="$(arg init_pca_k)"/>
+        <arg name="w_geom" value="$(arg w_geom)"/>
+        <arg name="w_hole" value="$(arg w_hole)"/>
+    </include>
+</launch>

@@ -30,6 +30,7 @@ class CustomKeyboardTeleop:
         rospy.loginfo("PageUp / PageDn : 上升 / 下降")
         rospy.loginfo("A / D : 向左转 / 向右转 (Yaw)")
         rospy.loginfo("W / S : 抬头 / 低头 (Pitch)")
+        rospy.loginfo("R : 姿态回正 (恢复初始 Yaw/Pitch/Roll)")
         rospy.loginfo("按 ESC 键退出")
 
     def on_press(self, key):
@@ -45,6 +46,11 @@ class CustomKeyboardTeleop:
             # 🌟 新增 W 和 S 键监听
             elif key.char == 'w':  self.active_keys['pitch_up'] = True
             elif key.char == 's':  self.active_keys['pitch_down'] = True
+            elif key.char == 'r':
+                reset_cmd = Twist()
+                reset_cmd.angular.x = 1.0
+                self.pub.publish(reset_cmd)
+                rospy.loginfo("姿态回正请求已发送")
 
     def on_release(self, key):
         if key == Key.up:          self.active_keys['forward'] = False

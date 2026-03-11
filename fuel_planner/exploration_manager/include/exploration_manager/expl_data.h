@@ -28,6 +28,9 @@ struct FSMParam {
   double replan_thresh2_;
   double replan_thresh3_;
   double replan_time_;  // second
+  bool show_viewpoints_;
+  bool show_trajectory_;
+  bool show_next_goal_;
 };
 
 struct ExplorationData {

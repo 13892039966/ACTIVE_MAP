@@ -20,6 +20,9 @@ void FastExplorationFSM::init(ros::NodeHandle& nh) {
   nh.param("fsm/thresh_replan2", fp_->replan_thresh2_, -1.0);
   nh.param("fsm/thresh_replan3", fp_->replan_thresh3_, -1.0);
   nh.param("fsm/replan_time", fp_->replan_time_, -1.0);
+  nh.param("fsm/show_viewpoints", fp_->show_viewpoints_, false);
+  nh.param("fsm/show_trajectory", fp_->show_trajectory_, false);
+  nh.param("fsm/show_next_goal", fp_->show_next_goal_, false);
 
   /* Initialize main modules */
   expl_manager_.reset(new FastExplorationManager);
@@ -198,7 +201,6 @@ int FastExplorationFSM::callExplorationPlanner() {
 
 void FastExplorationFSM::visualize() {
   auto info = &planner_manager_->local_data_;
-  auto plan_data = &planner_manager_->plan_data_;
   auto ed_ptr = expl_manager_->ed_;
 
   // Draw updated box
@@ -229,48 +231,84 @@ void FastExplorationFSM::visualize() {
   //   visualization_->drawCubes({}, 0.1, Vector4d(0, 0, 0, 0.5), "dead_frontier", i, 4);
 
   // Draw global top viewpoints info
-  // visualization_->drawSpheres(ed_ptr->points_, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
-  // visualization_->drawLines(ed_ptr->global_tour_, 0.07, Vector4d(0, 0.5, 0, 1), "global_tour", 0, 6);
-  // visualization_->drawLines(ed_ptr->points_, ed_ptr->views_, 0.05, Vector4d(0, 1, 0.5, 1), "view", 0, 6);
-  // visualization_->drawLines(ed_ptr->points_, ed_ptr->averages_, 0.03, Vector4d(1, 0, 0, 1),
-  // "point-average", 0, 6);
+  if (fp_->show_viewpoints_) {
+    visualization_->drawSpheres(ed_ptr->points_, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
+    visualization_->drawLines(ed_ptr->global_tour_, 0.07, Vector4d(0, 0.5, 0, 1), "global_tour", 0, 6);
+    visualization_->drawLines(ed_ptr->points_, ed_ptr->views_, 0.05, Vector4d(0, 1, 0.5, 1), "view", 0,
+                              6);
+    visualization_->drawLines(ed_ptr->points_, ed_ptr->averages_, 0.03, Vector4d(1, 0, 0, 1),
+                              "point-average", 0, 6);
+  } else {
+    visualization_->drawSpheres({}, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
+    visualization_->drawLines({}, 0.07, Vector4d(0, 0.5, 0, 1), "global_tour", 0, 6);
+    visualization_->drawLines({}, {}, 0.05, Vector4d(0, 1, 0.5, 1), "view", 0, 6);
+    visualization_->drawLines({}, {}, 0.03, Vector4d(1, 0, 0, 1), "point-average", 0, 6);
+  }
 
   // Draw local refined viewpoints info
-  // visualization_->drawSpheres(ed_ptr->refined_points_, 0.2, Vector4d(0, 0, 1, 1), "refined_pts", 0, 6);
-  // visualization_->drawLines(ed_ptr->refined_points_, ed_ptr->refined_views_, 0.05,
-  //                           Vector4d(0.5, 0, 1, 1), "refined_view", 0, 6);
-  // visualization_->drawLines(ed_ptr->refined_tour_, 0.07, Vector4d(0, 0, 1, 1), "refined_tour", 0, 6);
-  // visualization_->drawLines(ed_ptr->refined_views1_, ed_ptr->refined_views2_, 0.04, Vector4d(0, 0, 0,
-  // 1),
-  //                           "refined_view", 0, 6);
-  // visualization_->drawLines(ed_ptr->refined_points_, ed_ptr->unrefined_points_, 0.05, Vector4d(1, 1,
-  // 0, 1),
-  //                           "refine_pair", 0, 6);
-  // for (int i = 0; i < ed_ptr->n_points_.size(); ++i)
-  //   visualization_->drawSpheres(ed_ptr->n_points_[i], 0.1,
-  //                               visualization_->getColor(double(ed_ptr->refined_ids_[i]) /
-  //                               ed_ptr->frontiers_.size()),
-  //                               "n_points", i, 6);
-  // for (int i = ed_ptr->n_points_.size(); i < 15; ++i)
-  //   visualization_->drawSpheres({}, 0.1, Vector4d(0, 0, 0, 1), "n_points", i, 6);
+  if (fp_->show_viewpoints_) {
+    visualization_->drawSpheres(ed_ptr->refined_points_, 0.2, Vector4d(0, 0, 1, 1), "refined_pts", 0, 6);
+    visualization_->drawLines(ed_ptr->refined_points_, ed_ptr->refined_views_, 0.05,
+                              Vector4d(0.5, 0, 1, 1), "refined_view", 0, 6);
+    visualization_->drawLines(ed_ptr->refined_tour_, 0.07, Vector4d(0, 0, 1, 1), "refined_tour", 0, 6);
+    visualization_->drawLines(ed_ptr->refined_views1_, ed_ptr->refined_views2_, 0.04,
+                              Vector4d(0, 0, 0, 1), "refined_view", 1, 6);
+    visualization_->drawLines(ed_ptr->refined_points_, ed_ptr->unrefined_points_, 0.05,
+                              Vector4d(1, 1, 0, 1), "refine_pair", 0, 6);
+    for (int i = 0; i < ed_ptr->n_points_.size(); ++i)
+      visualization_->drawSpheres(
+          ed_ptr->n_points_[i], 0.1,
+          visualization_->getColor(ed_ptr->frontiers_.empty()
+                                       ? 0.0
+                                       : double(ed_ptr->refined_ids_[i]) / ed_ptr->frontiers_.size()),
+          "n_points", i, 6);
+    for (int i = ed_ptr->n_points_.size(); i < 15; ++i)
+      visualization_->drawSpheres({}, 0.1, Vector4d(0, 0, 0, 1), "n_points", i, 6);
+  } else {
+    visualization_->drawSpheres({}, 0.2, Vector4d(0, 0, 1, 1), "refined_pts", 0, 6);
+    visualization_->drawLines({}, {}, 0.05, Vector4d(0.5, 0, 1, 1), "refined_view", 0, 6);
+    visualization_->drawLines({}, {}, 0.04, Vector4d(0, 0, 0, 1), "refined_view", 1, 6);
+    visualization_->drawLines({}, 0.07, Vector4d(0, 0, 1, 1), "refined_tour", 0, 6);
+    visualization_->drawLines({}, {}, 0.05, Vector4d(1, 1, 0, 1), "refine_pair", 0, 6);
+    for (int i = 0; i < 15; ++i)
+      visualization_->drawSpheres({}, 0.1, Vector4d(0, 0, 0, 1), "n_points", i, 6);
+  }
 
   // Draw trajectory
-  // visualization_->drawSpheres({ ed_ptr->next_goal_ }, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
-  visualization_->drawBspline(info->position_traj_, 0.1, Vector4d(1.0, 0.0, 0.0, 1), false, 0.15,
-                              Vector4d(1, 1, 0, 1));
-  // visualization_->drawSpheres(plan_data->kino_path_, 0.1, Vector4d(1, 0, 1, 1), "kino_path", 0, 0);
-  // visualization_->drawLines(ed_ptr->path_next_goal_, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+  if (fp_->show_next_goal_) {
+    if (!ed_ptr->path_next_goal_.empty())
+      visualization_->drawSpheres({ ed_ptr->next_goal_ }, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+    else
+      visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+    visualization_->drawLines(ed_ptr->path_next_goal_, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+  } else {
+    visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+    visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+  }
+  if (fp_->show_trajectory_) {
+    visualization_->drawBspline(info->position_traj_, 0.1, Vector4d(1.0, 0.0, 0.0, 1), false, 0.15,
+                                Vector4d(1, 1, 0, 1));
+  } else {
+    visualization_->drawLines({}, 0.1, Vector4d(1.0, 0.0, 0.0, 1), "B-Spline", 0, 0);
+    for (int i = 1; i < 100; ++i) visualization_->drawSpheres({}, 0.1, Vector4d(1, 0, 0, 1), "B-Spline", i, 0);
+    for (int i = 50; i < 150; ++i) visualization_->drawSpheres({}, 0.15, Vector4d(1, 1, 0, 1), "B-Spline", i, 0);
+  }
 }
 
 void FastExplorationFSM::clearVisMarker() {
-  // visualization_->drawSpheres({}, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
-  // visualization_->drawLines({}, 0.07, Vector4d(0, 0.5, 0, 1), "global_tour", 0, 6);
-  // visualization_->drawSpheres({}, 0.2, Vector4d(0, 0, 1, 1), "refined_pts", 0, 6);
-  // visualization_->drawLines({}, {}, 0.05, Vector4d(0.5, 0, 1, 1), "refined_view", 0, 6);
-  // visualization_->drawLines({}, 0.07, Vector4d(0, 0, 1, 1), "refined_tour", 0, 6);
-  // visualization_->drawSpheres({}, 0.1, Vector4d(0, 0, 1, 1), "B-Spline", 0, 0);
-
-  // visualization_->drawLines({}, {}, 0.03, Vector4d(1, 0, 0, 1), "current_pose", 0, 6);
+  visualization_->drawSpheres({}, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
+  visualization_->drawLines({}, 0.07, Vector4d(0, 0.5, 0, 1), "global_tour", 0, 6);
+  visualization_->drawLines({}, {}, 0.05, Vector4d(0, 1, 0.5, 1), "view", 0, 6);
+  visualization_->drawLines({}, {}, 0.03, Vector4d(1, 0, 0, 1), "point-average", 0, 6);
+  visualization_->drawSpheres({}, 0.2, Vector4d(0, 0, 1, 1), "refined_pts", 0, 6);
+  visualization_->drawLines({}, {}, 0.05, Vector4d(0.5, 0, 1, 1), "refined_view", 0, 6);
+  visualization_->drawLines({}, {}, 0.04, Vector4d(0, 0, 0, 1), "refined_view", 1, 6);
+  visualization_->drawLines({}, 0.07, Vector4d(0, 0, 1, 1), "refined_tour", 0, 6);
+  visualization_->drawLines({}, {}, 0.05, Vector4d(1, 1, 0, 1), "refine_pair", 0, 6);
+  for (int i = 0; i < 15; ++i)
+    visualization_->drawSpheres({}, 0.1, Vector4d(0, 0, 0, 1), "n_points", i, 6);
+  visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+  visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
 }
 
 void FastExplorationFSM::frontierCallback(const ros::TimerEvent& e) {
@@ -300,6 +338,58 @@ void FastExplorationFSM::frontierCallback(const ros::TimerEvent& e) {
       visualization_->drawCubes({}, 0.1, Vector4d(0, 0, 0, 1), "frontier", i, 4);
       // visualization_->drawBox(Vector3d(0, 0, 0), Vector3d(0, 0, 0), Vector4d(1, 0, 0, 0.3),
       // "frontier_boxes", i, 4);
+    }
+
+    ed->points_.clear();
+    ed->yaws_.clear();
+    ed->averages_.clear();
+    ed->views_.clear();
+    ed->path_next_goal_.clear();
+    ed->refined_points_.clear();
+    ed->refined_views_.clear();
+    ed->refined_views1_.clear();
+    ed->refined_views2_.clear();
+    ed->refined_tour_.clear();
+    ed->unrefined_points_.clear();
+    ed->n_points_.clear();
+    ed->refined_ids_.clear();
+
+    if ((fp_->show_viewpoints_ || fp_->show_next_goal_) && !ed->frontiers_.empty()) {
+      ft->getTopViewpointsInfo(fd_->odom_pos_, ed->points_, ed->yaws_, ed->averages_);
+      for (int i = 0; i < ed->points_.size(); ++i) {
+        ed->views_.push_back(
+            ed->points_[i] + 2.0 * Vector3d(cos(ed->yaws_[i]), sin(ed->yaws_[i]), 0));
+      }
+
+      if (!ed->points_.empty()) {
+        ed->next_goal_ = ed->points_.front();
+        planner_manager_->path_finder_->reset();
+        if (planner_manager_->path_finder_->search(fd_->odom_pos_, ed->next_goal_) ==
+            Astar::REACH_END) {
+          ed->path_next_goal_ = planner_manager_->path_finder_->getPath();
+        }
+      }
+    }
+
+    if (fp_->show_viewpoints_) {
+      visualization_->drawSpheres(ed->points_, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
+      visualization_->drawLines(ed->points_, ed->views_, 0.05, Vector4d(0, 1, 0.5, 1), "view", 0, 6);
+      visualization_->drawLines(ed->points_, ed->averages_, 0.03, Vector4d(1, 0, 0, 1),
+                                "point-average", 0, 6);
+    } else {
+      visualization_->drawSpheres({}, 0.2, Vector4d(0, 0.5, 0, 1), "points", 0, 6);
+      visualization_->drawLines({}, {}, 0.05, Vector4d(0, 1, 0.5, 1), "view", 0, 6);
+      visualization_->drawLines({}, {}, 0.03, Vector4d(1, 0, 0, 1), "point-average", 0, 6);
+    }
+    if (fp_->show_next_goal_) {
+      if (!ed->path_next_goal_.empty())
+        visualization_->drawSpheres({ ed->next_goal_ }, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+      else
+        visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+      visualization_->drawLines(ed->path_next_goal_, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+    } else {
+      visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+      visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
     }
   }
 

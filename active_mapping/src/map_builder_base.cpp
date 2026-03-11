@@ -38,7 +38,7 @@ void MapBuilderBase::init(ros::NodeHandle& nh) {
     ikd_tree_ = std::make_unique<ikdtreeNS::KD_TREE<PointT>>();
     ikd_tree_->InitializeKDTree(0.3, 0.6, downsample_size_);
 
-    sub_cloud_ = nh_.subscribe("/airsim/point_cloud", 10, &MapBuilderBase::cloudCallback, this);
+    sub_cloud_ = nh_.subscribe("/cloud", 10, &MapBuilderBase::cloudCallback, this);
     pub_global_map_ = nh_.advertise<sensor_msgs::PointCloud2>("/active_mapping/global_map", 1);
 
     last_publish_time_ = ros::Time::now();

@@ -1,0 +1,31 @@
+<launch>
+    <arg name="input_topic" default="/cloud_alin_color"/>
+    <arg name="output_topic" default="/global_map"/>
+    <arg name="output_intensity_topic" default="/global_map_intensity"/>
+    <arg name="voxel_size" default="0.01"/>
+    <arg name="max_depth" default="30.0"/>
+    <arg name="publish_rate" default="1.0"/>
+    <arg name="neighbor_radius" default="1"/>
+    <arg name="knn_k" default="12"/>
+    <arg name="min_neighbors" default="4"/>
+    <arg name="max_points_per_cloud" default="250000"/>
+    <arg name="max_publish_voxels" default="200000"/>
+    <arg name="entropy_gamma" default="0.8"/>
+    <arg name="knn_sigma_scale" default="1.5"/>
+
+    <node pkg="active_mapping" type="structure_tensor_map.py" name="structure_tensor_map" output="screen">
+        <param name="input_topic" value="$(arg input_topic)"/>
+        <param name="output_topic" value="$(arg output_topic)"/>
+        <param name="output_intensity_topic" value="$(arg output_intensity_topic)"/>
+        <param name="voxel_size" value="$(arg voxel_size)"/>
+        <param name="max_depth" value="$(arg max_depth)"/>
+        <param name="publish_rate" value="$(arg publish_rate)"/>
+        <param name="neighbor_radius" value="$(arg neighbor_radius)"/>
+        <param name="knn_k" value="$(arg knn_k)"/>
+        <param name="min_neighbors" value="$(arg min_neighbors)"/>
+        <param name="max_points_per_cloud" value="$(arg max_points_per_cloud)"/>
+        <param name="max_publish_voxels" value="$(arg max_publish_voxels)"/>
+        <param name="entropy_gamma" value="$(arg entropy_gamma)"/>
+        <param name="knn_sigma_scale" value="$(arg knn_sigma_scale)"/>
+    </node>
+</launch>

@@ -36,9 +36,20 @@ target_link_libraries(active_mapping_node
   ${PCL_LIBRARIES}
 )
 
+add_executable(heatmap_cluster_node
+  src/heatmap_cluster_node.cpp
+)
+target_link_libraries(heatmap_cluster_node
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+)
+
 catkin_install_python(PROGRAMS
   scripts/airsim_frontend.py
   scripts/airsim_teleop.py
   scripts/custom_teleop.py
+  scripts/external_pose_tf_broadcaster.py
+  scripts/position_cmd_to_airsim.py
+  scripts/structure_tensor_map.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

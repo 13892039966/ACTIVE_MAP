@@ -33,7 +33,16 @@
   <arg name="frontier_cluster_min" default="30"/>
   <arg name="frontier_down_sample" default="2"/>
   <arg name="frontier_min_visib_num" default="8"/>
+  <arg name="frontier_min_candidate_dist" default="0.4"/>
+  <arg name="frontier_min_candidate_clearance" default="0.1"/>
+  <arg name="frontier_candidate_dphi_deg" default="10.0"/>
+  <arg name="frontier_candidate_rnum" default="5"/>
+  <arg name="frontier_candidate_rmin" default="0.8"/>
+  <arg name="frontier_candidate_rmax" default="2.2"/>
   <arg name="perception_max_dist" default="12.0"/>
+  <arg name="show_viewpoints" default="false"/>
+  <arg name="show_trajectory" default="false"/>
+  <arg name="show_next_goal" default="false"/>
 
   <!-- main node -->
   <node pkg="exploration_manager" name="exploration_node" type="exploration_node" output="screen">
@@ -47,14 +56,14 @@
     <param name="sdf_map/map_size_y"   value="$(arg map_size_y_)" /> 
     <param name="sdf_map/map_size_z"   value="$(arg map_size_z_)" /> 
     <!-- <param name="sdf_map/obstacles_inflation"     value="0.099" />  -->
-    <param name="sdf_map/obstacles_inflation"     value="0.199" /> 
+    <param name="sdf_map/obstacles_inflation"     value="0.30" /> 
     <param name="sdf_map/local_bound_inflate"    value="0.5"/>
     <param name="sdf_map/local_map_margin" value="50"/>
     <param name="sdf_map/ground_height"        value="$(arg sdf_ground_height)"/>
     <param name="sdf_map/default_dist"        value="0.0"/>
     
-    <param name="sdf_map/p_hit"  value="0.65"/>
-    <param name="sdf_map/p_miss" value="0.35"/>
+    <param name="sdf_map/p_hit"  value="0.70"/>
+    <param name="sdf_map/p_miss" value="0.24"/>
     <param name="sdf_map/p_min"  value="0.12"/>
     <param name="sdf_map/p_max"  value="0.90"/>
     <param name="sdf_map/p_occ"  value="0.80"/>
@@ -78,7 +87,7 @@
     <param name="map_ros/depth_filter_mindist"   value="$(arg depth_filter_mindist)"/>
     <param name="map_ros/depth_filter_margin"    value="2"/>
     <param name="map_ros/k_depth_scaling_factor" value="1000.0"/>
-    <param name="map_ros/skip_pixel" value="2"/>
+    <param name="map_ros/skip_pixel" value="1"/>
     <param name="map_ros/esdf_slice_height" value="0.3"/>
     <param name="map_ros/visualization_truncate_height"   value="$(arg vis_truncate_high)"/>
     <param name="map_ros/visualization_truncate_low"   value="$(arg vis_truncate_low)"/>
@@ -96,6 +105,9 @@
     <!-- <param name="fsm/thresh_replan2" value="100.0" type="double"/> -->
     <!-- <param name="fsm/thresh_replan3" value="0.1" type="double"/> -->
     <param name="fsm/replan_time" value="0.200" type="double"/>
+    <param name="fsm/show_viewpoints" value="$(arg show_viewpoints)" type="bool"/>
+    <param name="fsm/show_trajectory" value="$(arg show_trajectory)" type="bool"/>
+    <param name="fsm/show_next_goal" value="$(arg show_next_goal)" type="bool"/>
 
     <!-- Exploration manager -->
 
@@ -115,12 +127,12 @@
     <param name="frontier/cluster_min" value="$(arg frontier_cluster_min)" type="int"/>
     <param name="frontier/cluster_size_xy" value="2.0" type="double"/>
     <param name="frontier/cluster_size_z" value="10.0" type="double"/>
-    <param name="frontier/min_candidate_dist" value="0.75" type="double"/>
-    <param name="frontier/min_candidate_clearance" value="0.21" type="double"/>
-    <param name="frontier/candidate_dphi" value="$(eval 15 * 3.1415926 / 180.0)" type="double"/>
-    <param name="frontier/candidate_rnum" value="3" type="int"/>
-    <param name="frontier/candidate_rmin" value="1.5" type="double"/>
-    <param name="frontier/candidate_rmax" value="2.5" type="double"/>
+    <param name="frontier/min_candidate_dist" value="$(arg frontier_min_candidate_dist)" type="double"/>
+    <param name="frontier/min_candidate_clearance" value="$(arg frontier_min_candidate_clearance)" type="double"/>
+    <param name="frontier/candidate_dphi" value="$(eval float(arg('frontier_candidate_dphi_deg')) * 3.1415926 / 180.0)" type="double"/>
+    <param name="frontier/candidate_rnum" value="$(arg frontier_candidate_rnum)" type="int"/>
+    <param name="frontier/candidate_rmin" value="$(arg frontier_candidate_rmin)" type="double"/>
+    <param name="frontier/candidate_rmax" value="$(arg frontier_candidate_rmax)" type="double"/>
     <param name="frontier/down_sample" value="$(arg frontier_down_sample)" type="int"/>
     <param name="frontier/min_visib_num" value="$(arg frontier_min_visib_num)" type="int"/>
     <param name="frontier/min_view_finish_fraction" value="0.2" type="double"/>

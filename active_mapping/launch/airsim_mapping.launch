@@ -8,7 +8,7 @@
 
     <!-- Frontend cloud params -->
     <arg name="frontend_decimation" default="2"/>
-    <arg name="frontend_voxel_size" default="0.05"/>
+    <arg name="frontend_voxel_size" default="0.02"/>
     <arg name="frontend_max_depth" default="15.0"/>
 
     <!-- Backend pre-filter params -->
@@ -29,13 +29,15 @@
     <!-- Surfel mode params -->
     <arg name="surfel_radius" default="0.10"/>
     <arg name="depth_tolerance" default="0.05"/>
+    <arg name="init_pca_k" default="10"/>
+    <arg name="w_hole" default="0.4"/>
 
-    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen" />
+    <!-- <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen" /> -->
 
-    <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf" 
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf" 
           args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
 
-    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
+    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/> -->
 
     <!-- 点云密度更高，适合用来做纹理商分析 -->
     <!-- <node pkg="nodelet" type="nodelet" name="depth_to_cloud_official" 
@@ -48,7 +50,7 @@
     </node> -->
 
     <!-- 点云密度略低,可以给fuel来执行探索任务 -->
-    <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb" 
+    <!-- <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb" 
           args="load rtabmap_util/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
         
         <remap from="rgb/image"       to="/airsim/rgb"/>
@@ -60,9 +62,10 @@
         <param name="decimation" type="int" value="$(arg frontend_decimation)"/> 
         <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
         <param name="max_depth"  type="double" value="$(arg frontend_max_depth)"/>
-    </node>
+    </node> -->
 
     <node pkg="active_mapping" type="active_mapping_node" name="active_mapping_backend" output="screen">
+        <remap from="/cloud"           to="/airsim/point_cloud"/>
         <!-- 点云建图 -->
         <param name="map_type"        value="$(arg map_type)" />
         <param name="global_frame_id" value="$(arg global_frame_id)" />
@@ -86,9 +89,11 @@
         <!-- 面元地图参数（map_type=surfel 时生效） -->
         <param name="surfel_radius" value="$(arg surfel_radius)" /> 
         <param name="depth_tolerance" value="$(arg depth_tolerance)" />
+        <param name="init_pca_k" value="$(arg init_pca_k)" />
+        <param name="w_hole" value="$(arg w_hole)" />
     </node>
 
-    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+    <!-- <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" /> -->
 
     <!-- <node pkg="active_mapping" type="custom_teleop.py" name="custom_teleop" output="screen" /> -->
 

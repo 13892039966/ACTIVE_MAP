@@ -134,6 +134,8 @@ void PlanningVisualization::drawCubes(const vector<Eigen::Vector3d>& list, const
   mk.action = visualization_msgs::Marker::DELETE;
   pubs_[pub_id].publish(mk);
 
+  if (list.empty()) return;
+
   // pub new marker
   fillGeometryInfo(mk, list);
   mk.action = visualization_msgs::Marker::ADD;

@@ -7,11 +7,11 @@ Panels:
         - /Global Options1
         - /Status1
         - /PointCloud21
+        - /PointCloud21/Status1
         - /PointCloud23
         - /Marker1
-        - /Marker1/Status1
         - /Path1
-      Splitter Ratio: 0.5147058963775635
+      Splitter Ratio: 0.520588219165802
     Tree Height: 1079
   - Class: rviz/Selection
     Name: Selection
@@ -56,7 +56,7 @@ Visualization Manager:
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
       Value: true
-    - Alpha: 0
+    - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
         Max Value: 6.843978404998779
@@ -67,7 +67,7 @@ Visualization Manager:
       Class: rviz/PointCloud2
       Color: 255; 255; 255
       Color Transformer: RGB8
-      Decay Time: 200
+      Decay Time: 10
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
@@ -77,7 +77,7 @@ Visualization Manager:
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.05000000074505806
+      Size (m): 0.03999999910593033
       Style: Flat Squares
       Topic: /airsim/point_cloud
       Unreliable: false
@@ -133,9 +133,9 @@ Visualization Manager:
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.10000000149011612
-      Style: Boxes
-      Topic: /sdf_map/occupancy_all
+      Size (m): 0.03999999910593033
+      Style: Flat Squares
+      Topic: /active_mapping/global_map
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
@@ -184,13 +184,13 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /planning_vis/viewpoints
       Name: Marker
       Namespaces:
-        next_goal: true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
@@ -243,7 +243,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 10.527227401733398
+      Distance: 26.460880279541016
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -251,17 +251,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 2.2523961067199707
-        Y: 0.0743265300989151
-        Z: 2.2285101413726807
+        X: 4.099823474884033
+        Y: -0.7535341382026672
+        Z: 7.679388999938965
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.13979673385620117
+      Pitch: 0.209794819355011
       Target Frame: <Fixed Frame>
-      Yaw: 1.7253342866897583
+      Yaw: 3.0753719806671143
     Saved: ~
 Window Geometry:
   Displays:
