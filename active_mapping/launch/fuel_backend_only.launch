@@ -1,0 +1,98 @@
+<launch>
+    <!-- FUEL backend: consume frontend topics directly. -->
+    <arg name="frontend_max_depth" default="10.0"/>
+    <arg name="virtual_ceil_height" default="-1.0"/>
+
+    <arg name="map_size_x" default="50.0"/>
+    <arg name="map_size_y" default="50.0"/>
+    <arg name="map_size_z" default="15.0"/>
+    <arg name="ground_height" default="-10.0"/>
+    <arg name="box_min_x" default="$(eval -0.5 * float(arg('map_size_x')))"/>
+    <arg name="box_min_y" default="$(eval -0.5 * float(arg('map_size_y')))"/>
+    <arg name="box_min_z" default="$(arg ground_height)"/>
+    <arg name="box_max_x" default="$(eval 0.5 * float(arg('map_size_x')))"/>
+    <arg name="box_max_y" default="$(eval 0.5 * float(arg('map_size_y')))"/>
+    <arg name="box_max_z" default="$(eval float(arg('ground_height')) + float(arg('map_size_z')))"/>
+    <arg name="init_x" default="0.0"/>
+    <arg name="init_y" default="0.0"/>
+    <arg name="init_z" default="0.0"/>
+    <arg name="max_vel" default="1.0"/>
+    <arg name="max_acc" default="0.5"/>
+    <arg name="frontier_min_candidate_dist" default="0.4"/>
+    <arg name="frontier_min_candidate_clearance" default="0.35"/>
+    <arg name="frontier_candidate_dphi_deg" default="10.0"/>
+    <arg name="frontier_candidate_rnum" default="5"/>
+    <arg name="frontier_candidate_rmin" default="0.8"/>
+    <arg name="frontier_candidate_rmax" default="1.4"/>
+    <arg name="show_viewpoints" default="false"/>
+    <arg name="show_trajectory" default="true"/>
+    <arg name="show_next_goal" default="true"/>
+
+    <include file="$(find exploration_manager)/launch/algorithm.xml">
+        <arg name="map_size_x_" value="$(arg map_size_x)"/>
+        <arg name="map_size_y_" value="$(arg map_size_y)"/>
+        <arg name="map_size_z_" value="$(arg map_size_z)"/>
+
+        <arg name="box_min_x" value="$(arg box_min_x)"/>
+        <arg name="box_min_y" value="$(arg box_min_y)"/>
+        <arg name="box_min_z" value="$(arg box_min_z)"/>
+        <arg name="box_max_x" value="$(arg box_max_x)"/>
+        <arg name="box_max_y" value="$(arg box_max_y)"/>
+        <arg name="box_max_z" value="$(arg box_max_z)"/>
+
+        <arg name="odometry_topic" value="/airsim/odom"/>
+        <arg name="sensor_pose_topic" value="/airsim/pose"/>
+        <arg name="depth_topic" value="/unused_depth"/>
+        <arg name="cloud_topic" value="/airsim/point_cloud"/>
+
+        <arg name="cx" value="320.0"/>
+        <arg name="cy" value="240.0"/>
+        <arg name="fx" value="320.0"/>
+        <arg name="fy" value="320.0"/>
+
+        <arg name="max_vel" value="$(arg max_vel)"/>
+        <arg name="max_acc" value="$(arg max_acc)"/>
+        <arg name="sdf_ground_height" value="$(arg ground_height)"/>
+        <arg name="sdf_max_ray_length" value="$(arg frontend_max_depth)"/>
+        <arg name="sdf_virtual_ceil_height" value="$(arg virtual_ceil_height)"/>
+        <arg name="depth_filter_maxdist" value="$(arg frontend_max_depth)"/>
+        <arg name="vis_truncate_high" value="20.0"/>
+        <arg name="vis_truncate_low" value="-3.0"/>
+        <arg name="frontier_cluster_min" value="30"/>
+        <arg name="frontier_down_sample" value="2"/>
+        <arg name="frontier_min_visib_num" value="4"/>
+        <arg name="frontier_min_candidate_dist" value="$(arg frontier_min_candidate_dist)"/>
+        <arg name="frontier_min_candidate_clearance" value="$(arg frontier_min_candidate_clearance)"/>
+        <arg name="frontier_candidate_dphi_deg" value="$(arg frontier_candidate_dphi_deg)"/>
+        <arg name="frontier_candidate_rnum" value="$(arg frontier_candidate_rnum)"/>
+        <arg name="frontier_candidate_rmin" value="$(arg frontier_candidate_rmin)"/>
+        <arg name="frontier_candidate_rmax" value="$(arg frontier_candidate_rmax)"/>
+        <arg name="perception_max_dist" value="6.0"/>
+        <arg name="show_viewpoints" value="$(arg show_viewpoints)"/>
+        <arg name="show_trajectory" value="$(arg show_trajectory)"/>
+        <arg name="show_next_goal" value="$(arg show_next_goal)"/>
+    </include>
+
+    <node pkg="plan_manage" name="traj_server" type="traj_server" output="screen">
+        <remap from="/position_cmd" to="planning/pos_cmd"/>
+        <remap from="/odom_world" to="/airsim/odom"/>
+        <param name="traj_server/time_forward" value="1.5" type="double"/>
+        <param name="traj_server/pub_traj_id" value="4" type="int"/>
+        <param name="traj_server/init_x" value="$(arg init_x)" type="double"/>
+        <param name="traj_server/init_y" value="$(arg init_y)" type="double"/>
+        <param name="traj_server/init_z" value="$(arg init_z)" type="double"/>
+
+        <param name="perception_utils/top_angle" value="0.56125" type="double"/>
+        <param name="perception_utils/left_angle" value="0.69222" type="double"/>
+        <param name="perception_utils/right_angle" value="0.68901" type="double"/>
+        <param name="perception_utils/max_dist" value="6.0" type="double"/>
+        <param name="perception_utils/vis_dist" value="1.0" type="double"/>
+    </node>
+
+    <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
+        <remap from="~odom" to="/airsim/odom"/>
+        <remap from="~goal" to="/move_base_simple/goal"/>
+        <remap from="~traj_start_trigger" to="/traj_start_trigger"/>
+        <param name="waypoint_type" value="point"/>
+    </node>
+</launch>
