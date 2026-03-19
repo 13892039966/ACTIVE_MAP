@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace fast_planner {
 namespace {
@@ -43,9 +42,15 @@ int LocalExplorationPlanner::planToViewpoint(
     const Vector3d& pos, const Vector3d& vel, const Vector3d& acc, const Vector3d& yaw,
     const Vector3d& next_pos, const double next_yaw) {
   ros::Time t1 = ros::Time::now();
+  Vector3d safe_goal;
+  if (!planner_manager_->projectToValidExplorePoint(next_pos, safe_goal, 3.0)) {
+    ROS_ERROR_STREAM("Failed to project exploration goal into box/free space: "
+                     << next_pos.transpose());
+    return FAIL;
+  }
 
-  if (!planGeometricPathFrontend(pos, next_pos)) return FAIL;
-  int backend_result = solveMincoBackend(vel, acc, yaw, next_pos, next_yaw);
+  if (!planGeometricPathFrontend(pos, safe_goal)) return FAIL;
+  int backend_result = solveMincoBackend(vel, acc, yaw, safe_goal, next_yaw);
   if (backend_result != SUCCEED) return backend_result;
 
   double traj_plan_time = (ros::Time::now() - t1).toSec();
@@ -56,7 +61,11 @@ int LocalExplorationPlanner::planToViewpoint(
 bool LocalExplorationPlanner::planGeometricPathFrontend(const Vector3d& raw_start,
                                                         const Vector3d& goal) {
   Vector3d search_start = raw_start;
-  findSearchStart(raw_start, search_start);
+  if (!findSearchStart(raw_start, search_start)) {
+    ROS_ERROR_STREAM("Failed to project exploration start into box/free space: "
+                     << raw_start.transpose());
+    return false;
+  }
 
   planner_manager_->path_finder_->reset();
   if (planner_manager_->path_finder_->search(search_start, goal) != Astar::REACH_END) {
@@ -93,6 +102,12 @@ bool LocalExplorationPlanner::planGeometricPathFrontend(const Vector3d& raw_star
   }
 
   ed_->path_next_goal_ = planner_manager_->path_finder_->getPath();
+  vector<Vector3d> safe_path;
+  if (!planner_manager_->sanitizeExplorePath(ed_->path_next_goal_, safe_path)) {
+    ROS_ERROR("Path frontend produced a path outside exploration space.");
+    return false;
+  }
+  ed_->path_next_goal_ = safe_path;
   shortenPath(ed_->path_next_goal_);
   return true;
 }
@@ -108,7 +123,8 @@ int LocalExplorationPlanner::solveMincoBackend(
 
   if (len < radius_close) {
     ed_->next_goal_ = next_pos;
-    planner_manager_->planExploreTraj(ed_->path_next_goal_, vel, acc, time_lb);
+    if (!planner_manager_->planExploreTraj(ed_->path_next_goal_, vel, acc, time_lb, next_yaw))
+      return FAIL;
   } else if (len > radius_far) {
     double len2 = 0.0;
     vector<Eigen::Vector3d> truncated_path = { ed_->path_next_goal_.front() };
@@ -118,10 +134,12 @@ int LocalExplorationPlanner::solveMincoBackend(
       truncated_path.push_back(cur_pt);
     }
     ed_->next_goal_ = truncated_path.back();
-    planner_manager_->planExploreTraj(truncated_path, vel, acc, time_lb);
+    if (!planner_manager_->planExploreTraj(truncated_path, vel, acc, time_lb, next_yaw))
+      return FAIL;
   } else {
     ed_->next_goal_ = next_pos;
-    planner_manager_->planExploreTraj(ed_->path_next_goal_, vel, acc, time_lb);
+    if (!planner_manager_->planExploreTraj(ed_->path_next_goal_, vel, acc, time_lb, next_yaw))
+      return FAIL;
   }
 
   if (planner_manager_->local_data_.duration_ < time_lb - 0.1) {
@@ -134,50 +152,12 @@ int LocalExplorationPlanner::solveMincoBackend(
 
 bool LocalExplorationPlanner::findSearchStart(const Vector3d& raw_start,
                                               Vector3d& search_start) const {
-  search_start = raw_start;
-  if (!sdf_map_ || !sdf_map_->isInMap(raw_start)) return false;
-  if (sdf_map_->getOccupancy(raw_start) != SDFMap::UNKNOWN) return true;
-
-  Eigen::Vector3i start_idx;
-  sdf_map_->posToIndex(raw_start, start_idx);
-
-  const double resolution = sdf_map_->getResolution();
-  const int max_radius = std::max(1, static_cast<int>(std::ceil(2.0 / resolution)));
-  double best_dist2 = std::numeric_limits<double>::infinity();
-  bool found = false;
-
-  for (int radius = 0; radius <= max_radius; ++radius) {
-    for (int dx = -radius; dx <= radius; ++dx) {
-      for (int dy = -radius; dy <= radius; ++dy) {
-        for (int dz = -radius; dz <= radius; ++dz) {
-          if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) != radius) continue;
-
-          const Eigen::Vector3i idx = start_idx + Eigen::Vector3i(dx, dy, dz);
-          if (!sdf_map_->isInMap(idx)) continue;
-          if (sdf_map_->getOccupancy(idx) != SDFMap::FREE) continue;
-          if (sdf_map_->getInflateOccupancy(idx) != 0) continue;
-
-          Vector3d candidate;
-          sdf_map_->indexToPos(idx, candidate);
-          const double dist2 = (candidate - raw_start).squaredNorm();
-          if (dist2 < best_dist2) {
-            best_dist2 = dist2;
-            search_start = candidate;
-            found = true;
-          }
-        }
-      }
-    }
-
-    if (found) {
-      ROS_WARN_STREAM("Exploration start snapped from unknown cell " << raw_start.transpose()
-                                                                     << " to "
-                                                                     << search_start.transpose());
-      return true;
-    }
+  const bool ok = planner_manager_->projectToValidExplorePoint(raw_start, search_start, 3.0);
+  if (ok && (search_start - raw_start).norm() > 1e-3) {
+    ROS_WARN_STREAM("Exploration start snapped into exploration space from "
+                    << raw_start.transpose() << " to " << search_start.transpose());
   }
-
-  return false;
+  return ok;
 }
 
 void LocalExplorationPlanner::shortenPath(vector<Vector3d>& path) const {
@@ -195,7 +175,8 @@ void LocalExplorationPlanner::shortenPath(vector<Vector3d>& path) const {
       ViewNode::caster_->input(short_tour.back(), path[i + 1]);
       Eigen::Vector3i idx;
       while (ViewNode::caster_->nextId(idx) && ros::ok()) {
-        if (edt_environment_->sdf_map_->getInflateOccupancy(idx) == 1 ||
+        if (!edt_environment_->sdf_map_->isInBox(idx) ||
+            edt_environment_->sdf_map_->getInflateOccupancy(idx) == 1 ||
             edt_environment_->sdf_map_->getOccupancy(idx) == SDFMap::UNKNOWN) {
           short_tour.push_back(path[i]);
           break;

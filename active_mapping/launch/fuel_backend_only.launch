@@ -17,7 +17,7 @@
     <arg name="init_y" default="0.0"/>
     <arg name="init_z" default="0.0"/>
     <arg name="max_vel" default="1.0"/>
-    <arg name="max_acc" default="0.5"/>
+    <arg name="max_acc" default="1.0"/>
     <arg name="frontier_min_candidate_dist" default="0.4"/>
     <arg name="frontier_min_candidate_clearance" default="0.35"/>
     <arg name="frontier_candidate_dphi_deg" default="10.0"/>

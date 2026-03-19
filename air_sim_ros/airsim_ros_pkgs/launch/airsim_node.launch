@@ -1,7 +1,13 @@
 <launch>
 	<arg name="output" default="screen"/>
 	<arg name="publish_clock" default="false"/>
-	<arg name="host" default="localhost" />
+	<arg name="host" default="127.0.0.1" />
+	<arg name="start_env" default="true" />
+	<arg name="env_root" default="/home/hmq/ws/SchoolGymDay/LinuxNoEditor" />
+	<arg name="scene_map" default="/Game/SchoolGym/Maps/SchoolGymDay" />
+	<arg name="env_extra_args" default="-windowed -ResX=1280 -ResY=720" />
+	<arg name="startup_delay_sec" default="4" />
+	<arg name="takeoff_height" default="1.0" />
 
 	<arg name="map_size_x" value="100.0" />
     <arg name="map_size_y" value="20.0" />
@@ -14,8 +20,22 @@
 	<arg name="vel_limit" value="7.0" />
 	<arg name="acc_limit" value="10.0" />
 
-	<node name="airsim_node" pkg="airsim_ros_pkgs" type="airsim_node" output="$(arg output)">
+	<group if="$(arg start_env)">
+		<node pkg="airsim_ros_pkgs"
+		      type="start_activegs_env.sh"
+		      name="activegs_env"
+		      output="$(arg output)"
+		      required="true"
+		      args="$(arg env_root) $(arg scene_map) $(arg env_extra_args)" />
+	</group>
+
+	<node name="airsim_node"
+	      pkg="airsim_ros_pkgs"
+	      type="airsim_node"
+	      output="$(arg output)"
+	      launch-prefix="$(find airsim_ros_pkgs)/scripts/delayed_exec.sh $(arg startup_delay_sec)">
 		<!-- ROS timer rates. Note that timer callback will be processed at maximum possible rate, upperbounded by the following ROS params -->
+		<param name="host_ip" type="string" value="$(arg host)" />
 		<param name="update_airsim_control_every_n_sec" type="double" value="0.01" />
 		<param name="update_lidar_every_n_sec" type="double" value="0.05" />
 		<param name="publish_clock" type="bool" value="$(arg publish_clock)" />
@@ -26,6 +46,9 @@
 		<param name="global_map_object_filter" type="string" value="$(arg global_map_object_filter)" />
 	</node>
 
+	<include file="$(find active_mapping)/launch/airsim_mapping_fronted.launch">
+    </include>
+
   	<!-- <node pkg="state_machine" type="goal_publisher" name="goal_publisher" output="screen"/>  -->
 
 	<!-- Static transforms -->
@@ -33,5 +56,8 @@
 	<!-- trajectory server -->
 	<!-- <include file="$(find state_machine)/launch/server.launch" /> -->
 	<!-- px4 controller node -->
-	<include file="$(find px4ctrl)/launch/ctrl_md.launch" />
+	<include file="$(find px4ctrl)/launch/ctrl_md.launch">
+		<arg name="auto_takeoff_height" value="$(arg takeoff_height)" />
+		<arg name="launch_prefix" value="$(find airsim_ros_pkgs)/scripts/delayed_exec.sh $(arg startup_delay_sec)" />
+	</include>
 </launch>

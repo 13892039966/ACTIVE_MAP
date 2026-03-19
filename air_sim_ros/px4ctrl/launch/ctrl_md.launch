@@ -3,11 +3,14 @@
 	<arg name="odom_topic" default="/airsim/odom" />
 	<arg name="cmd_topic" default="/planning/pos_cmd" />
 	<arg name="imu_topic" default="/airsim_node/drone_1/imu/Imu" />
+	<arg name="auto_takeoff_height" default="1.0" />
+	<arg name="launch_prefix" default="" />
 
-	<node pkg="px4ctrl" type="px4ctrl_node" name="px4ctrl" output="screen">
+	<node pkg="px4ctrl" type="px4ctrl_node" name="px4ctrl" output="screen" launch-prefix="$(arg launch_prefix)">
 		<remap from="~odom" to="$(arg odom_topic)" />
 		<remap from="~cmd" to="$(arg cmd_topic)" />
 		<remap from="~imu" to="$(arg imu_topic)" />
+		<param name="auto_takeoff_height" value="$(arg auto_takeoff_height)" />
         <rosparam command="load" file="$(find px4ctrl)/config/ctrl_param_$(arg uavname).yaml" />
 	</node>
  

@@ -126,6 +126,16 @@ struct PlanParameters {
 
   double clearance_;
   int dynamic_;
+  double minco_weight_time_ = 1.0;
+  double minco_rho_collision_ = 200.0;
+  double minco_rho_path_ = 5.0;
+  double minco_rho_v_ = 1000.0;
+  double minco_rho_a_ = 200.0;
+  double minco_safe_distance_ = 0.25;
+  double minco_smooth_epsilon_ = 0.1;
+  double minco_anchor_weight_ = 2.0;
+  double minco_lbfgs_delta_ = 1.0e-2;
+  int minco_lbfgs_max_iter_ = 200;
   /* processing time */
   double time_search_ = 0.0;
   double time_optimize_ = 0.0;

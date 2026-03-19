@@ -520,11 +520,7 @@ void Controller::update(
 	Matrix3d wRb_odom = odom.q.toRotationMatrix();
 	Vector3d z_b_curr = wRb_odom.col(2);
 	double u1 = F_des.dot(z_b_curr);
-	double fullparam = 0.7;
 	u.thrust = u1 / param.full_thrust;
-	if(u.thrust>=fullparam)
-		ROS_WARN("FULL THRUST");
-	u.thrust = u.thrust>=fullparam?fullparam:u.thrust;
 
 
 

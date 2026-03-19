@@ -56,8 +56,8 @@
     <param name="sdf_map/map_size_y"   value="$(arg map_size_y_)" /> 
     <param name="sdf_map/map_size_z"   value="$(arg map_size_z_)" /> 
     <!-- <param name="sdf_map/obstacles_inflation"     value="0.099" />  -->
-    <param name="sdf_map/obstacles_inflation"     value="0.30" /> 
-    <param name="sdf_map/local_bound_inflate"    value="0.5"/>
+    <param name="sdf_map/obstacles_inflation"     value="0.45" />
+    <param name="sdf_map/local_bound_inflate"    value="0.6"/>
     <param name="sdf_map/local_map_margin" value="50"/>
     <param name="sdf_map/ground_height"        value="$(arg sdf_ground_height)"/>
     <param name="sdf_map/default_dist"        value="0.0"/>
@@ -160,7 +160,8 @@
     <param name="manager/max_jerk" value="4" type="double"/>
     <param name="manager/dynamic_environment" value="0" type="int"/>
     <param name="manager/local_segment_length" value="6.0" type="double"/>
-    <param name="manager/clearance_threshold" value="0.2" type="double"/>
+    <param name="manager/clearance_threshold" value="0.3" type="double"/>
+    <param name="manager/minco_safe_distance" value="0.4" type="double"/>
     <param name="manager/control_points_distance" value="0.35" type="double"/>
     <param name="manager/use_geometric_path" value="true" type="bool"/>
     <param name="manager/use_kinodynamic_path" value="true" type="bool"/>

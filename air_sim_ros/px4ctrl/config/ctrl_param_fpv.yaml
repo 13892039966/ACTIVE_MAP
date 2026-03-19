@@ -4,7 +4,7 @@ gra         : 9.81
 hov_percent : 0.59
 # full_thrust : 66.102448   # Real net thrust(unit:N) in 100% thrust percentage
 full_thrust: 66.8704
-ctrl_rate   : 100.0
+ctrl_rate   : 200.0
 
 pxy_error_max: 0.6
 vxy_error_max: 1.0
@@ -12,7 +12,7 @@ pz_error_max: 0.3
 vz_error_max: 1.0
 yaw_error_max: 0.7
 
-use_yaw_rate_ctrl: false
+use_yaw_rate_ctrl: true
 perform_aerodynamics_compensation: false
 
 hover:
@@ -23,12 +23,12 @@ hover:
 
 gain:
     hover:
-        Kp0: 1.7 #1.5
-        Kp1: 1.7 #5
-        Kp2: 1.7
-        Kv0: 1.5 #6
-        Kv1: 1.5 #6
-        Kv2: 1.5 #6
+        Kp0: 1.5 #1.5
+        Kp1: 1.5 #5
+        Kp2: 1.5 
+        Kv0: 1.0 #6
+        Kv1: 1.0 #6
+        Kv2: 1.0 #6
         Kvi0: 0.1
         Kvi1: 0.1
         Kvi2: 0.1
@@ -44,8 +44,8 @@ gain:
         Ka0: 1.0
         Ka1: 1.0
         Ka2: 1.0
-        Kyaw: 10.0 # 15.0
-        Krp: 10.0 #25
+        Kyaw: 15.0 # 15.0
+        Krp: 30.0 #25
     track:
         Kp0: 1.7 #1.5
         Kp1: 1.7 #5
@@ -68,8 +68,8 @@ gain:
         Ka0: 1.0
         Ka1: 1.0
         Ka2: 1.0
-        Kyaw: 10.0 # 15.0
-        Krp: 10.0 #25
+        Kyaw: 15.0 # 15.0
+        Krp: 30.0 #25
 
 msg_timeout:
     odom: 0.5
