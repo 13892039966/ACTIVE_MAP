@@ -6,6 +6,7 @@
 #include <ros/ros.h>
 
 #include <bspline/non_uniform_bspline.h>
+#include <gcopter/trajectory.hpp>
 #include <poly_traj/polynomial_traj.h>
 #include <path_searching/topo_prm.h>
 #include <active_perception/traj_visibility.h>
@@ -138,8 +139,11 @@ struct LocalTrajData {
   double duration_;
   ros::Time start_time_;
   Eigen::Vector3d start_pos_;
+  bool use_minco_ = false;
   NonUniformBspline position_traj_, velocity_traj_, acceleration_traj_, yaw_traj_, yawdot_traj_,
       yawdotdot_traj_;
+  Trajectory<7> minco_traj_;
+  Trajectory<5> minco_yaw_traj_;
 };
 
 // structure of trajectory info

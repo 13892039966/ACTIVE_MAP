@@ -2,11 +2,15 @@
 #define _EXPL_DATA_H_
 
 #include <Eigen/Eigen>
+#include <string>
+#include <utility>
 #include <vector>
-#include <bspline/Bspline.h>
+#include <traj_utils/PolyTraj.h>
 
 using std::vector;
 using Eigen::Vector3d;
+using std::pair;
+using std::string;
 
 namespace fast_planner {
 struct FSMData {
@@ -20,7 +24,8 @@ struct FSMData {
 
   Eigen::Vector3d start_pt_, start_vel_, start_acc_, start_yaw_;  // start state
   vector<Eigen::Vector3d> start_poss;
-  bspline::Bspline newest_traj_;
+  traj_utils::PolyTraj newest_traj_;
+  traj_utils::PolyTraj newest_yaw_traj_;
 };
 
 struct FSMParam {

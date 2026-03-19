@@ -51,16 +51,18 @@ add_executable(fast_planner_node
 target_link_libraries(fast_planner_node 
   ${catkin_LIBRARIES}
   )
+add_dependencies(fast_planner_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 add_library(plan_manage 
   src/planner_manager.cpp
   src/planner_manager_dev.cpp
   )
 target_link_libraries(plan_manage ${catkin_LIBRARIES})
+add_dependencies(plan_manage ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 add_executable(traj_server src/traj_server.cpp)
 target_link_libraries(traj_server ${catkin_LIBRARIES})
-# add_dependencies(traj_server ${${PROJECT_NAME}_EXPORTED_TARGETS})
+add_dependencies(traj_server ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 # benchmark node
 # add_executable(compare_topo
@@ -81,6 +83,7 @@ target_link_libraries( proc_msg
     ${catkin_LIBRARIES} 
     ${PCL_LIBRARIES}
     )  
+add_dependencies(proc_msg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 add_executable(proc_msg2 
     test/process_msg2.cpp
@@ -89,3 +92,4 @@ target_link_libraries( proc_msg2
     ${catkin_LIBRARIES} 
     ${PCL_LIBRARIES}
     )  
+add_dependencies(proc_msg2 ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

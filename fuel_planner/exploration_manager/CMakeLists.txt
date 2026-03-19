@@ -45,10 +45,13 @@ add_executable(exploration_node
   src/exploration_node.cpp 
   src/fast_exploration_fsm.cpp
   src/fast_exploration_manager.cpp
+  src/global_exploration_planner.cpp
+  src/local_exploration_planner.cpp
   )
 target_link_libraries(exploration_node 
   ${catkin_LIBRARIES}
   )
+add_dependencies(exploration_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 # add_library(exploration_manager
 #   src/fast_exploration_manager.cpp
@@ -61,9 +64,11 @@ add_executable(write_tsp test/write_tsp.cpp)
 target_link_libraries(write_tsp
   ${catkin_LIBRARIES} 
 )
+add_dependencies(write_tsp ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 
 add_executable(load_obj test/load_obj.cpp)
 target_link_libraries(load_obj
   ${catkin_LIBRARIES} ${PCL_LIBRARIES}
 )
+add_dependencies(load_obj ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

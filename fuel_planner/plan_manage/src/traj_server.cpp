@@ -1,6 +1,8 @@
 #include "bspline/non_uniform_bspline.h"
 #include "nav_msgs/Odometry.h"
 #include "bspline/Bspline.h"
+#include "traj_utils/PolyTraj.h"
+#include "gcopter/trajectory.hpp"
 #include "quadrotor_msgs/PositionCommand.h"
 #include "std_msgs/Empty.h"
 #include "visualization_msgs/Marker.h"
@@ -23,10 +25,16 @@ quadrotor_msgs::PositionCommand cmd;
 
 // Info of generated traj
 vector<NonUniformBspline> traj_;
+PolynomialTraj poly_pos_traj_, poly_yaw_traj_;
+std::shared_ptr<Trajectory<7>> minco_pos_traj_;
+std::shared_ptr<Trajectory<5>> minco_yaw_traj_;
 double traj_duration_;
 ros::Time start_time_;
 int traj_id_;
 int pub_traj_id_;
+bool use_poly_traj_ = false;
+bool receive_poly_yaw_ = false;
+bool use_minco_traj_ = false;
 
 shared_ptr<PerceptionUtils> percep_utils_;
 
@@ -246,6 +254,8 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
   traj_duration_ = traj_[0].getTimeSum();
 
   receive_traj_ = true;
+  use_poly_traj_ = false;
+  receive_poly_yaw_ = true;
 
   // Record the start time of flight
   if (start_time.isZero()) {
@@ -254,30 +264,180 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
   }
 }
 
+void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
+  if (msg->order == 7) {
+    if (msg->duration.size() * 8 != msg->coef_x.size() || msg->coef_x.size() != msg->coef_y.size() ||
+        msg->coef_x.size() != msg->coef_z.size()) {
+      ROS_ERROR("[traj_server] Invalid order-7 PolyTraj message.");
+      return;
+    }
+
+    std::vector<double> dura(msg->duration.begin(), msg->duration.end());
+    std::vector<Piece<7>::CoefficientMat> c_mats(dura.size());
+    for (size_t i = 0; i < dura.size(); ++i) {
+      const int offset = static_cast<int>(i) * 8;
+      c_mats[i].row(0) << msg->coef_x[offset + 0], msg->coef_x[offset + 1], msg->coef_x[offset + 2],
+          msg->coef_x[offset + 3], msg->coef_x[offset + 4], msg->coef_x[offset + 5],
+          msg->coef_x[offset + 6], msg->coef_x[offset + 7];
+      c_mats[i].row(1) << msg->coef_y[offset + 0], msg->coef_y[offset + 1], msg->coef_y[offset + 2],
+          msg->coef_y[offset + 3], msg->coef_y[offset + 4], msg->coef_y[offset + 5],
+          msg->coef_y[offset + 6], msg->coef_y[offset + 7];
+      c_mats[i].row(2) << msg->coef_z[offset + 0], msg->coef_z[offset + 1], msg->coef_z[offset + 2],
+          msg->coef_z[offset + 3], msg->coef_z[offset + 4], msg->coef_z[offset + 5],
+          msg->coef_z[offset + 6], msg->coef_z[offset + 7];
+    }
+    minco_pos_traj_.reset(new Trajectory<7>(dura, c_mats));
+    start_time_ = msg->start_time;
+    traj_id_ = msg->traj_id;
+    traj_duration_ = minco_pos_traj_->getTotalDuration();
+    receive_traj_ = true;
+    use_poly_traj_ = false;
+    use_minco_traj_ = true;
+    receive_poly_yaw_ = false;
+  } else if (msg->order == 5) {
+    if (msg->duration.size() * 6 != msg->coef_x.size() || msg->coef_x.size() != msg->coef_y.size() ||
+        msg->coef_x.size() != msg->coef_z.size()) {
+      ROS_ERROR("[traj_server] Invalid PolyTraj message.");
+      return;
+    }
+
+    poly_pos_traj_.reset();
+    for (size_t i = 0; i < msg->duration.size(); ++i) {
+      const int offset = static_cast<int>(i) * 6;
+      Polynomial::Vector6d cx, cy, cz;
+      for (int j = 0; j < 6; ++j) {
+        cx(j) = msg->coef_x[offset + j];
+        cy(j) = msg->coef_y[offset + j];
+        cz(j) = msg->coef_z[offset + j];
+      }
+      poly_pos_traj_.addSegment(Polynomial(cx, cy, cz, msg->duration[i]));
+    }
+
+    start_time_ = msg->start_time;
+    traj_id_ = msg->traj_id;
+    traj_duration_ = poly_pos_traj_.getTotalTime();
+    receive_traj_ = true;
+    use_poly_traj_ = true;
+    use_minco_traj_ = false;
+    receive_poly_yaw_ = false;
+  } else {
+    ROS_ERROR("[traj_server] Unsupported PolyTraj order: %u", msg->order);
+    return;
+  }
+
+  if (start_time.isZero()) {
+    ROS_WARN("start flight");
+    start_time = ros::Time::now();
+  }
+}
+
+void polyYawTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
+  if (msg->order != 5) {
+    ROS_ERROR("[traj_server] Only support quintic yaw PolyTraj now.");
+    return;
+  }
+  if (msg->duration.size() * 6 != msg->coef_x.size() || msg->coef_x.size() != msg->coef_y.size() ||
+      msg->coef_x.size() != msg->coef_z.size()) {
+    ROS_ERROR("[traj_server] Invalid PolyTraj message.");
+    return;
+  }
+
+  if (use_minco_traj_) {
+    std::vector<double> dura(msg->duration.begin(), msg->duration.end());
+    std::vector<Piece<5>::CoefficientMat> c_mats(dura.size());
+    for (size_t i = 0; i < dura.size(); ++i) {
+      const int offset = static_cast<int>(i) * 6;
+      c_mats[i].row(0) << msg->coef_x[offset + 0], msg->coef_x[offset + 1], msg->coef_x[offset + 2],
+          msg->coef_x[offset + 3], msg->coef_x[offset + 4], msg->coef_x[offset + 5];
+      c_mats[i].row(1) << msg->coef_y[offset + 0], msg->coef_y[offset + 1], msg->coef_y[offset + 2],
+          msg->coef_y[offset + 3], msg->coef_y[offset + 4], msg->coef_y[offset + 5];
+      c_mats[i].row(2) << msg->coef_z[offset + 0], msg->coef_z[offset + 1], msg->coef_z[offset + 2],
+          msg->coef_z[offset + 3], msg->coef_z[offset + 4], msg->coef_z[offset + 5];
+    }
+    minco_yaw_traj_.reset(new Trajectory<5>(dura, c_mats));
+  } else {
+    poly_yaw_traj_.reset();
+    for (size_t i = 0; i < msg->duration.size(); ++i) {
+      const int offset = static_cast<int>(i) * 6;
+      Polynomial::Vector6d cx, cy, cz;
+      for (int j = 0; j < 6; ++j) {
+        cx(j) = msg->coef_x[offset + j];
+        cy(j) = msg->coef_y[offset + j];
+        cz(j) = msg->coef_z[offset + j];
+      }
+      poly_yaw_traj_.addSegment(Polynomial(cx, cy, cz, msg->duration[i]));
+    }
+  }
+  receive_poly_yaw_ = true;
+}
+
 void cmdCallback(const ros::TimerEvent& e) {
   // No publishing before receive traj data
   if (!receive_traj_) return;
 
   ros::Time time_now = ros::Time::now();
   double t_cur = (time_now - start_time_).toSec();
-  Eigen::Vector3d pos, vel, acc, jer;
-  double yaw, yawdot;
+  Eigen::Vector3d pos = Eigen::Vector3d::Zero();
+  Eigen::Vector3d vel = Eigen::Vector3d::Zero();
+  Eigen::Vector3d acc = Eigen::Vector3d::Zero();
+  Eigen::Vector3d jer = Eigen::Vector3d::Zero();
+  double yaw = 0.0, yawdot = 0.0;
 
   if (t_cur < traj_duration_ && t_cur >= 0.0) {
     // Current time within range of planned traj
-    pos = traj_[0].evaluateDeBoorT(t_cur);
-    vel = traj_[1].evaluateDeBoorT(t_cur);
-    acc = traj_[2].evaluateDeBoorT(t_cur);
-    yaw = traj_[3].evaluateDeBoorT(t_cur)[0];
-    yawdot = traj_[4].evaluateDeBoorT(t_cur)[0];
-    jer = traj_[5].evaluateDeBoorT(t_cur);
+    if (use_minco_traj_) {
+      pos = minco_pos_traj_->getPos(t_cur);
+      vel = minco_pos_traj_->getVel(t_cur);
+      acc = minco_pos_traj_->getAcc(t_cur);
+      jer = minco_pos_traj_->getJer(t_cur);
+      if (receive_poly_yaw_) {
+        const double yaw_t = std::min(t_cur, minco_yaw_traj_->getTotalDuration());
+        yaw = minco_yaw_traj_->getPos(yaw_t)[0];
+        yawdot = minco_yaw_traj_->getVel(yaw_t)[0];
+      } else {
+        yaw = atan2(vel.y(), vel.x());
+      }
+    } else if (use_poly_traj_) {
+      pos = poly_pos_traj_.evaluate(t_cur, 0);
+      vel = poly_pos_traj_.evaluate(t_cur, 1);
+      acc = poly_pos_traj_.evaluate(t_cur, 2);
+      jer = poly_pos_traj_.evaluate(t_cur, 3);
+      if (receive_poly_yaw_) {
+        double yaw_t = std::min(t_cur, poly_yaw_traj_.getTotalTime());
+        yaw = poly_yaw_traj_.evaluate(yaw_t, 0)[0];
+        yawdot = poly_yaw_traj_.evaluate(yaw_t, 1)[0];
+      } else {
+        yaw = atan2(vel.y(), vel.x());
+        yawdot = 0.0;
+      }
+    } else {
+      pos = traj_[0].evaluateDeBoorT(t_cur);
+      vel = traj_[1].evaluateDeBoorT(t_cur);
+      acc = traj_[2].evaluateDeBoorT(t_cur);
+      yaw = traj_[3].evaluateDeBoorT(t_cur)[0];
+      yawdot = traj_[4].evaluateDeBoorT(t_cur)[0];
+      jer = traj_[5].evaluateDeBoorT(t_cur);
+    }
   } else if (t_cur >= traj_duration_) {
     // Current time exceed range of planned traj
     // keep publishing the final position and yaw
-    pos = traj_[0].evaluateDeBoorT(traj_duration_);
+    if (use_minco_traj_) {
+      pos = minco_pos_traj_->getPos(traj_duration_);
+      yaw = receive_poly_yaw_ ? minco_yaw_traj_->getPos(std::min(traj_duration_, minco_yaw_traj_->getTotalDuration()))[0]
+                              : 0.0;
+      jer.setZero();
+    } else if (use_poly_traj_) {
+      pos = poly_pos_traj_.evaluate(traj_duration_, 0);
+      yaw = receive_poly_yaw_ ? poly_yaw_traj_.evaluate(std::min(traj_duration_, poly_yaw_traj_.getTotalTime()), 0)[0]
+                              : 0.0;
+      jer.setZero();
+    } else {
+      pos = traj_[0].evaluateDeBoorT(traj_duration_);
+      yaw = traj_[3].evaluateDeBoorT(traj_duration_)[0];
+      jer.setZero();
+    }
     vel.setZero();
     acc.setZero();
-    yaw = traj_[3].evaluateDeBoorT(traj_duration_)[0];
     yawdot = 0.0;
 
     // Report info of the whole flight
@@ -439,6 +599,8 @@ int main(int argc, char** argv) {
   ros::NodeHandle nh("~");
 
   ros::Subscriber bspline_sub = node.subscribe("planning/bspline", 10, bsplineCallback);
+  ros::Subscriber poly_traj_sub = node.subscribe("planning/trajectory", 10, polyTrajCallback);
+  ros::Subscriber poly_yaw_sub = node.subscribe("planning/yaw_trajectory", 10, polyYawTrajCallback);
   ros::Subscriber replan_sub = node.subscribe("planning/replan", 10, replanCallback);
   ros::Subscriber new_sub = node.subscribe("planning/new", 10, newCallback);
   ros::Subscriber odom_sub = node.subscribe("/odom_world", 50, odomCallbck);

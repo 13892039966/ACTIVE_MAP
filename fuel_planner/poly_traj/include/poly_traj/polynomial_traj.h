@@ -50,6 +50,18 @@ public:
     return time_;
   }
 
+  const Vector6d& getCoeffX() const {
+    return cx_;
+  }
+
+  const Vector6d& getCoeffY() const {
+    return cy_;
+  }
+
+  const Vector6d& getCoeffZ() const {
+    return cz_;
+  }
+
 private:
   // Time of the polynomial segment
   double time_;
@@ -160,6 +172,18 @@ public:
                             const Eigen::Vector3d& end_vel, const Eigen::Vector3d& start_acc,
                             const Eigen::Vector3d& end_acc, const Eigen::VectorXd& times,
                             PolynomialTraj& poly_traj);
+
+  int getPieceNum() const {
+    return segments_.size();
+  }
+
+  double getPieceTime(const int idx) const {
+    return times_.at(idx);
+  }
+
+  const Polynomial& getPiece(const int idx) const {
+    return segments_.at(idx);
+  }
 
 private:
   vector<Polynomial> segments_;

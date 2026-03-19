@@ -16,6 +16,8 @@ class EDTEnvironment;
 class SDFMap;
 class FastPlannerManager;
 class FrontierFinder;
+class GlobalExplorationPlanner;
+class LocalExplorationPlanner;
 struct ExplorationParam;
 struct ExplorationData;
 
@@ -39,22 +41,12 @@ public:
   shared_ptr<ExplorationParam> ep_;
   shared_ptr<FastPlannerManager> planner_manager_;
   shared_ptr<FrontierFinder> frontier_finder_;
-  // unique_ptr<ViewFinder> view_finder_;
 
 private:
   shared_ptr<EDTEnvironment> edt_environment_;
   shared_ptr<SDFMap> sdf_map_;
-
-  // Find optimal tour for coarse viewpoints of all frontiers
-  void findGlobalTour(const Vector3d& cur_pos, const Vector3d& cur_vel, const Vector3d cur_yaw,
-                      vector<int>& indices);
-
-  // Refine local tour for next few frontiers, using more diverse viewpoints
-  void refineLocalTour(const Vector3d& cur_pos, const Vector3d& cur_vel, const Vector3d& cur_yaw,
-                       const vector<vector<Vector3d>>& n_points, const vector<vector<double>>& n_yaws,
-                       vector<Vector3d>& refined_pts, vector<double>& refined_yaws);
-
-  void shortenPath(vector<Vector3d>& path);
+  shared_ptr<GlobalExplorationPlanner> global_planner_;
+  shared_ptr<LocalExplorationPlanner> local_planner_;
 
 public:
   typedef shared_ptr<FastExplorationManager> Ptr;

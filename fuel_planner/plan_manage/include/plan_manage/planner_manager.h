@@ -3,6 +3,8 @@
 
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline/non_uniform_bspline.h>
+#include <gcopter/minco.hpp>
+#include <gcopter/trajectory.hpp>
 
 #include <path_searching/astar2.h>
 #include <path_searching/kinodynamic_astar.h>
@@ -16,6 +18,7 @@
 #include <plan_manage/plan_container.hpp>
 
 #include <ros/ros.h>
+#include <traj_utils/PolyTraj.h>
 
 namespace fast_planner {
 // Fast Planner Manager
@@ -42,6 +45,8 @@ public:
 
   void initPlanModules(ros::NodeHandle& nh);
   void setGlobalWaypoints(vector<Eigen::Vector3d>& waypoints);
+  void exportTrajToPolyMsg(traj_utils::PolyTraj& pos_msg, traj_utils::PolyTraj& yaw_msg,
+                           const ros::Time& start_time);
 
   bool checkTrajCollision(double& distance);
   void calcNextYaw(const double& last_yaw, double& yaw);
@@ -60,6 +65,11 @@ private:
 
   unique_ptr<KinodynamicAstar> kino_path_finder_;
   vector<BsplineOptimizer::Ptr> bspline_optimizers_;
+
+  bool solveMincoPositionTraj(const vector<Eigen::Vector3d>& tour, const Eigen::Vector3d& cur_vel,
+                              const Eigen::Vector3d& cur_acc, const double& time_lb);
+  bool solveMincoYawTraj(const Eigen::Vector3d& start_yaw, const double& end_yaw, bool lookfwd,
+                         const double& relax_time);
 
   void updateTrajInfo();
 

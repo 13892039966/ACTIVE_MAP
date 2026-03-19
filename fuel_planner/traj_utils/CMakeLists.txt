@@ -14,15 +14,26 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   cv_bridge
+  message_generation
 )
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL 1.7 REQUIRED)
 
+add_message_files(
+  FILES
+  PolyTraj.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
+
 catkin_package(
  INCLUDE_DIRS include
  LIBRARIES traj_utils
- CATKIN_DEPENDS path_searching bspline bspline_opt poly_traj
+ CATKIN_DEPENDS path_searching bspline bspline_opt poly_traj message_runtime
 #  DEPENDS system_lib
 )
 
@@ -42,6 +53,7 @@ add_library( traj_utils
 target_link_libraries( traj_utils
     ${catkin_LIBRARIES} 
     )  
+add_dependencies(traj_utils ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 add_executable(process_msg 
     src/process_msg.cpp
@@ -50,3 +62,4 @@ target_link_libraries( process_msg
     ${catkin_LIBRARIES} 
     ${PCL_LIBRARIES}
     )  
+add_dependencies(process_msg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

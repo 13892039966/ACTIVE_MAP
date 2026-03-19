@@ -4,12 +4,158 @@
 #include <plan_env/raycast.h>
 
 #include <thread>
+#include <cmath>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <visualization_msgs/Marker.h>
 
 namespace fast_planner {
+namespace {
+PolynomialTraj bsplineToPolynomialTraj(NonUniformBspline bspline) {
+  const double duration = bspline.getTimeSum();
+  const double dt = bspline.getKnotSpan();
+  const int piece_num = std::max(1, static_cast<int>(std::round(duration / dt)));
+
+  Eigen::MatrixXd positions(piece_num + 1, 3);
+  Eigen::VectorXd times(piece_num);
+
+  for (int i = 0; i <= piece_num; ++i) {
+    const double t = std::min(duration, i * dt);
+    positions.row(i) = bspline.evaluateDeBoorT(t).transpose();
+    if (i < piece_num) {
+      const double next_t = std::min(duration, (i + 1) * dt);
+      times(i) = std::max(1e-3, next_t - t);
+    }
+  }
+
+  NonUniformBspline vel_traj = bspline.getDerivative();
+  NonUniformBspline acc_traj = vel_traj.getDerivative();
+
+  PolynomialTraj poly_traj;
+  PolynomialTraj::waypointsTraj(positions, vel_traj.evaluateDeBoorT(0.0),
+                                vel_traj.evaluateDeBoorT(duration),
+                                acc_traj.evaluateDeBoorT(0.0),
+                                acc_traj.evaluateDeBoorT(duration), times, poly_traj);
+  return poly_traj;
+}
+
+PolynomialTraj yawBsplineToPolynomialTraj(NonUniformBspline bspline) {
+  const double duration = bspline.getTimeSum();
+  const double dt = bspline.getKnotSpan();
+  const int piece_num = std::max(1, static_cast<int>(std::round(duration / dt)));
+
+  Eigen::MatrixXd positions(piece_num + 1, 3);
+  Eigen::VectorXd times(piece_num);
+  double yaw_offset = 0.0;
+  double prev_yaw = 0.0;
+
+  for (int i = 0; i <= piece_num; ++i) {
+    const double t = std::min(duration, i * dt);
+    double yaw = bspline.evaluateDeBoorT(t)(0);
+    if (i > 0) {
+      while (yaw + yaw_offset - prev_yaw > M_PI)
+        yaw_offset -= 2.0 * M_PI;
+      while (yaw + yaw_offset - prev_yaw < -M_PI)
+        yaw_offset += 2.0 * M_PI;
+    }
+    yaw += yaw_offset;
+    positions.row(i) << yaw, 0.0, 0.0;
+    prev_yaw = yaw;
+    if (i < piece_num) {
+      const double next_t = std::min(duration, (i + 1) * dt);
+      times(i) = std::max(1e-3, next_t - t);
+    }
+  }
+
+  NonUniformBspline yawdot_traj = bspline.getDerivative();
+  NonUniformBspline yawdotdot_traj = yawdot_traj.getDerivative();
+  Eigen::Vector3d start_vel(yawdot_traj.evaluateDeBoorT(0.0)(0), 0.0, 0.0);
+  Eigen::Vector3d end_vel(yawdot_traj.evaluateDeBoorT(duration)(0), 0.0, 0.0);
+  Eigen::Vector3d start_acc(yawdotdot_traj.evaluateDeBoorT(0.0)(0), 0.0, 0.0);
+  Eigen::Vector3d end_acc(yawdotdot_traj.evaluateDeBoorT(duration)(0), 0.0, 0.0);
+
+  PolynomialTraj poly_traj;
+  PolynomialTraj::waypointsTraj(positions, start_vel, end_vel, start_acc, end_acc, times, poly_traj);
+  return poly_traj;
+}
+
+void polynomialTrajToRosMsg(const PolynomialTraj& poly_traj, const int traj_id,
+                            const ros::Time& start_time, traj_utils::PolyTraj& poly_msg) {
+  const int piece_num = poly_traj.getPieceNum();
+  poly_msg.drone_id = 0;
+  poly_msg.traj_id = traj_id;
+  poly_msg.start_time = start_time;
+  poly_msg.order = 5;
+  poly_msg.duration.resize(piece_num);
+  poly_msg.coef_x.resize(6 * piece_num);
+  poly_msg.coef_y.resize(6 * piece_num);
+  poly_msg.coef_z.resize(6 * piece_num);
+
+  for (int i = 0; i < piece_num; ++i) {
+    const auto& piece = poly_traj.getPiece(i);
+    poly_msg.duration[i] = piece.getTime();
+    const auto& cx = piece.getCoeffX();
+    const auto& cy = piece.getCoeffY();
+    const auto& cz = piece.getCoeffZ();
+    const int offset = i * 6;
+    for (int j = 0; j < 6; ++j) {
+      poly_msg.coef_x[offset + j] = cx(j);
+      poly_msg.coef_y[offset + j] = cy(j);
+      poly_msg.coef_z[offset + j] = cz(j);
+    }
+  }
+}
+
+void mincoTrajToRosMsg(const Trajectory<7>& traj, const int traj_id, const ros::Time& start_time,
+                       traj_utils::PolyTraj& poly_msg) {
+  const Eigen::VectorXd durs = traj.getDurations();
+  const int piece_num = traj.getPieceNum();
+  poly_msg.drone_id = 0;
+  poly_msg.traj_id = traj_id;
+  poly_msg.start_time = start_time;
+  poly_msg.order = 7;
+  poly_msg.duration.resize(piece_num);
+  poly_msg.coef_x.resize(8 * piece_num);
+  poly_msg.coef_y.resize(8 * piece_num);
+  poly_msg.coef_z.resize(8 * piece_num);
+  for (int i = 0; i < piece_num; ++i) {
+    poly_msg.duration[i] = durs(i);
+    const auto cmat = traj[i].getCoeffMat();
+    const int offset = i * 8;
+    for (int j = 0; j < 8; ++j) {
+      poly_msg.coef_x[offset + j] = cmat(0, j);
+      poly_msg.coef_y[offset + j] = cmat(1, j);
+      poly_msg.coef_z[offset + j] = cmat(2, j);
+    }
+  }
+}
+
+void mincoYawTrajToRosMsg(const Trajectory<5>& traj, const int traj_id, const ros::Time& start_time,
+                          traj_utils::PolyTraj& poly_msg) {
+  const Eigen::VectorXd durs = traj.getDurations();
+  const int piece_num = traj.getPieceNum();
+  poly_msg.drone_id = 0;
+  poly_msg.traj_id = traj_id;
+  poly_msg.start_time = start_time;
+  poly_msg.order = 5;
+  poly_msg.duration.resize(piece_num);
+  poly_msg.coef_x.resize(6 * piece_num);
+  poly_msg.coef_y.resize(6 * piece_num);
+  poly_msg.coef_z.resize(6 * piece_num);
+  for (int i = 0; i < piece_num; ++i) {
+    const auto cmat = traj[i].getCoeffMat();
+    poly_msg.duration[i] = durs(i);
+    const int offset = i * 6;
+    for (int j = 0; j < 6; ++j) {
+      poly_msg.coef_x[offset + j] = cmat(0, j);
+      poly_msg.coef_y[offset + j] = cmat(1, j);
+      poly_msg.coef_z[offset + j] = cmat(2, j);
+    }
+  }
+}
+}  // namespace
+
 // SECTION interfaces for setup and query
 
 FastPlannerManager::FastPlannerManager() {
@@ -93,16 +239,37 @@ void FastPlannerManager::setGlobalWaypoints(vector<Eigen::Vector3d>& waypoints) 
   plan_data_.global_waypoints_ = waypoints;
 }
 
+void FastPlannerManager::exportTrajToPolyMsg(traj_utils::PolyTraj& pos_msg,
+                                             traj_utils::PolyTraj& yaw_msg,
+                                             const ros::Time& start_time) {
+  if (local_data_.use_minco_) {
+    mincoTrajToRosMsg(local_data_.minco_traj_, local_data_.traj_id_, start_time, pos_msg);
+    mincoYawTrajToRosMsg(local_data_.minco_yaw_traj_, local_data_.traj_id_, start_time, yaw_msg);
+    return;
+  }
+
+  const PolynomialTraj pos_poly = bsplineToPolynomialTraj(local_data_.position_traj_);
+  const PolynomialTraj yaw_poly = yawBsplineToPolynomialTraj(local_data_.yaw_traj_);
+  polynomialTrajToRosMsg(pos_poly, local_data_.traj_id_, start_time, pos_msg);
+  polynomialTrajToRosMsg(yaw_poly, local_data_.traj_id_, start_time, yaw_msg);
+}
+
 bool FastPlannerManager::checkTrajCollision(double& distance) {
   double t_now = (ros::Time::now() - local_data_.start_time_).toSec();
-
-  Eigen::Vector3d cur_pt = local_data_.position_traj_.evaluateDeBoorT(t_now);
+  Eigen::Vector3d cur_pt;
+  if (local_data_.use_minco_)
+    cur_pt = local_data_.minco_traj_.getPos(t_now);
+  else
+    cur_pt = local_data_.position_traj_.evaluateDeBoorT(t_now);
   double radius = 0.0;
   Eigen::Vector3d fut_pt;
   double fut_t = 0.02;
 
   while (radius < 6.0 && t_now + fut_t < local_data_.duration_) {
-    fut_pt = local_data_.position_traj_.evaluateDeBoorT(t_now + fut_t);
+    if (local_data_.use_minco_)
+      fut_pt = local_data_.minco_traj_.getPos(t_now + fut_t);
+    else
+      fut_pt = local_data_.position_traj_.evaluateDeBoorT(t_now + fut_t);
     // double dist = edt_environment_->sdf_map_->getDistance(fut_pt);
     if (sdf_map_->getInflateOccupancy(fut_pt) == 1) {
       distance = radius;
@@ -114,6 +281,83 @@ bool FastPlannerManager::checkTrajCollision(double& distance) {
     fut_t += 0.02;
   }
 
+  return true;
+}
+
+bool FastPlannerManager::solveMincoPositionTraj(const vector<Eigen::Vector3d>& tour,
+                                                const Eigen::Vector3d& cur_vel,
+                                                const Eigen::Vector3d& cur_acc,
+                                                const double& time_lb) {
+  if (tour.size() < 2) return false;
+
+  const int piece_num = std::max(2, static_cast<int>(tour.size()) - 1);
+  Eigen::Matrix<double, 3, 4> ini_state, fin_state;
+  ini_state << tour.front(), cur_vel, cur_acc, Eigen::Vector3d::Zero();
+  fin_state << tour.back(), Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero();
+
+  Eigen::VectorXd times(piece_num);
+  double total_time = 0.0;
+  for (int i = 0; i < piece_num; ++i) {
+    const Eigen::Vector3d& p0 = tour[std::min(i, static_cast<int>(tour.size()) - 1)];
+    const Eigen::Vector3d& p1 = tour[std::min(i + 1, static_cast<int>(tour.size()) - 1)];
+    times(i) = std::max(0.15, (p1 - p0).norm() / std::max(0.1, pp_.max_vel_ * 0.8));
+    total_time += times(i);
+  }
+  if (time_lb > 0.0 && total_time < time_lb) {
+    times *= time_lb / total_time;
+  }
+
+  Eigen::MatrixXd inner_points(3, piece_num - 1);
+  for (int i = 0; i < piece_num - 1; ++i) {
+    const int idx = std::min(i + 1, static_cast<int>(tour.size()) - 1);
+    inner_points.col(i) = tour[idx];
+  }
+
+  minco::MINCO_S4NU minco;
+  minco.setConditions(ini_state, fin_state, piece_num);
+  minco.setParameters(inner_points, times);
+  minco.getTrajectory(local_data_.minco_traj_);
+  local_data_.duration_ = local_data_.minco_traj_.getTotalDuration();
+  local_data_.start_pos_ = tour.front();
+  local_data_.use_minco_ = true;
+  return true;
+}
+
+bool FastPlannerManager::solveMincoYawTraj(const Eigen::Vector3d& start_yaw, const double& end_yaw,
+                                           bool lookfwd, const double& relax_time) {
+  const int piece_num = std::max(2, static_cast<int>(std::ceil(local_data_.duration_ / 0.8)));
+  const double dt = std::max(0.1, local_data_.duration_ / piece_num);
+
+  Eigen::Matrix3d ini_state, fin_state;
+  ini_state << Eigen::Vector3d(start_yaw(0), 0.0, 0.0),
+               Eigen::Vector3d(start_yaw(1), 0.0, 0.0),
+               Eigen::Vector3d(start_yaw(2), 0.0, 0.0);
+  fin_state << Eigen::Vector3d(end_yaw, 0.0, 0.0),
+               Eigen::Vector3d(0.0, 0.0, 0.0),
+               Eigen::Vector3d(0.0, 0.0, 0.0);
+
+  Eigen::Matrix3Xd inner_points(3, piece_num - 1);
+  for (int i = 0; i < piece_num - 1; ++i) {
+    double t = std::min(local_data_.duration_, (i + 1) * dt);
+    double yaw_target = end_yaw;
+    if (lookfwd) {
+      const double tf = std::min(local_data_.duration_, t + std::max(0.5, relax_time));
+      const Eigen::Vector3d pc = local_data_.minco_traj_.getPos(t);
+      const Eigen::Vector3d pf = local_data_.minco_traj_.getPos(tf);
+      const Eigen::Vector3d dir = pf - pc;
+      if (dir.head<2>().norm() > 1e-3) yaw_target = atan2(dir.y(), dir.x());
+    }
+    inner_points.col(i) << yaw_target, 0.0, 0.0;
+  }
+
+  Eigen::VectorXd times = Eigen::VectorXd::Constant(piece_num, dt);
+  times(piece_num - 1) += local_data_.duration_ - dt * piece_num;
+  if (times(piece_num - 1) < 0.05) times(piece_num - 1) = 0.05;
+
+  minco::MINCO_S3NU minco;
+  minco.setConditions(ini_state, fin_state, piece_num);
+  minco.setParameters(inner_points, times);
+  minco.getTrajectory(local_data_.minco_yaw_traj_);
   return true;
 }
 
@@ -183,6 +427,7 @@ bool FastPlannerManager::kinodynamicReplan(const Eigen::Vector3d& start_pt,
 
   bspline_optimizers_[0]->optimize(ctrl_pts, ts, cost_function, 1, 1);
   local_data_.position_traj_.setUniformBspline(ctrl_pts, pp_.bspline_degree_, ts);
+  local_data_.use_minco_ = false;
 
   vector<Eigen::Vector3d> start2, end2;
   local_data_.position_traj_.getBoundaryStates(2, 0, start2, end2);
@@ -266,53 +511,11 @@ bool FastPlannerManager::kinodynamicReplan(const Eigen::Vector3d& start_pt,
 void FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
     const Eigen::Vector3d& cur_vel, const Eigen::Vector3d& cur_acc, const double& time_lb) {
   if (tour.empty()) ROS_ERROR("Empty path to traj planner");
-
-  // Generate traj through waypoints-based method
-  const int pt_num = tour.size();
-  Eigen::MatrixXd pos(pt_num, 3);
-  for (int i = 0; i < pt_num; ++i) pos.row(i) = tour[i];
-
-  Eigen::Vector3d zero(0, 0, 0);
-  Eigen::VectorXd times(pt_num - 1);
-  for (int i = 0; i < pt_num - 1; ++i)
-    times(i) = (pos.row(i + 1) - pos.row(i)).norm() / (pp_.max_vel_ * 0.5);
-
-  PolynomialTraj init_traj;
-  PolynomialTraj::waypointsTraj(pos, cur_vel, zero, cur_acc, zero, times, init_traj);
-
-  // B-spline-based optimization
-  vector<Vector3d> points, boundary_deri;
-  double duration = init_traj.getTotalTime();
-  int seg_num = init_traj.getLength() / pp_.ctrl_pt_dist;
-  seg_num = max(8, seg_num);
-  double dt = duration / double(seg_num);
-
-  std::cout << "duration: " << duration << ", seg_num: " << seg_num << ", dt: " << dt << std::endl;
-
-  for (double ts = 0.0; ts <= duration + 1e-4; ts += dt)
-    points.push_back(init_traj.evaluate(ts, 0));
-  boundary_deri.push_back(init_traj.evaluate(0.0, 1));
-  boundary_deri.push_back(init_traj.evaluate(duration, 1));
-  boundary_deri.push_back(init_traj.evaluate(0.0, 2));
-  boundary_deri.push_back(init_traj.evaluate(duration, 2));
-
-  Eigen::MatrixXd ctrl_pts;
-  NonUniformBspline::parameterizeToBspline(
-      dt, points, boundary_deri, pp_.bspline_degree_, ctrl_pts);
-  NonUniformBspline tmp_traj(ctrl_pts, pp_.bspline_degree_, dt);
-
-  int cost_func = BsplineOptimizer::NORMAL_PHASE;
-  if (pp_.min_time_) cost_func |= BsplineOptimizer::MINTIME;
-
-  vector<Vector3d> start, end;
-  tmp_traj.getBoundaryStates(2, 0, start, end);
-  bspline_optimizers_[0]->setBoundaryStates(start, end);
-  if (time_lb > 0) bspline_optimizers_[0]->setTimeLowerBound(time_lb);
-
-  bspline_optimizers_[0]->optimize(ctrl_pts, dt, cost_func, 1, 1);
-  local_data_.position_traj_.setUniformBspline(ctrl_pts, pp_.bspline_degree_, dt);
-
-  updateTrajInfo();
+  if (!solveMincoPositionTraj(tour, cur_vel, cur_acc, time_lb)) {
+    ROS_ERROR("MINCO position solve failed.");
+    return;
+  }
+  local_data_.traj_id_ += 1;
 }
 
 // !SECTION
@@ -516,6 +719,7 @@ void FastPlannerManager::refineTraj(NonUniformBspline& best_traj) {
 }
 
 void FastPlannerManager::updateTrajInfo() {
+  local_data_.use_minco_ = false;
   local_data_.velocity_traj_ = local_data_.position_traj_.getDerivative();
   local_data_.acceleration_traj_ = local_data_.velocity_traj_.getDerivative();
 
@@ -773,6 +977,11 @@ void FastPlannerManager::planYaw(const Eigen::Vector3d& start_yaw) {
 
 void FastPlannerManager::planYawExplore(const Eigen::Vector3d& start_yaw, const double& end_yaw,
     bool lookfwd, const double& relax_time) {
+  if (local_data_.use_minco_) {
+    solveMincoYawTraj(start_yaw, end_yaw, lookfwd, relax_time);
+    return;
+  }
+
   const int seg_num = 12;
   double dt_yaw = local_data_.duration_ / seg_num;  // time of B-spline segment
   Eigen::Vector3d start_yaw3d = start_yaw;
