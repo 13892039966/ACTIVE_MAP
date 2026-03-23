@@ -38,6 +38,7 @@
     <arg name="enable_traj_server" default="false"/>
     <arg name="enable_waypoint_generator" default="false"/>
     <arg name="enable_position_cmd_to_airsim" default="false"/>
+    <arg name="enable_frontier_timer" default="true"/>
 
     <include file="$(find plan_manage)/launch/topo_algorithm.xml">
         <arg name="map_size_x_" value="$(arg map_size_x)"/>
@@ -65,6 +66,8 @@
         <arg name="point2_y" value="$(arg point2_y)"/>
         <arg name="point2_z" value="$(arg point2_z)"/>
     </include>
+
+    <param name="fsm/enable_frontier_timer" value="$(arg enable_frontier_timer)" type="bool"/>
 
     <!-- <group if="$(arg enable_traj_server)">
         <node pkg="plan_manage" name="traj_server" type="traj_server" output="screen">

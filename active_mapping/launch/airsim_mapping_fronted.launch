@@ -4,8 +4,6 @@
     <arg name="frontend_decimation" default="2"/>
     <arg name="frontend_voxel_size" default="0.05"/>
     <arg name="frontend_max_depth" default="5.0"/>
-    <arg name="enable_teleop" default="true"/>
-    <arg name="enable_capture" default="true"/>
     <arg name="capture_output_dir" default="/home/xhy/mapping_GS/active_recon_ws/viewpoint_captures/mycolmap"/>
     <arg name="camera_axis_variant" default="swap_yz_flip_y"/>
     <arg name="pose_rotation_semantics" default="rwc"/>
@@ -30,12 +28,12 @@
         <param name="max_depth"  type="double" value="$(arg frontend_max_depth)"/>
     </node>
 
-    <node if="$(arg enable_capture)" pkg="active_mapping" type="airsim_capture_syncd.py" name="airsim_capture_syncd" output="screen">
+    <node pkg="active_mapping" type="airsim_capture_syncd.py" name="airsim_capture_syncd" output="screen">
         <param name="output_dir" value="$(arg capture_output_dir)"/>
         <param name="camera_axis_variant" value="$(arg camera_axis_variant)"/>
         <param name="pose_rotation_semantics" value="$(arg pose_rotation_semantics)"/>
     </node>
 
-    <node if="$(arg enable_teleop)" pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
     <node pkg="active_mapping" type="custom_teleop.py" name="custom_teleop" output="screen" />
 </launch>

@@ -14,6 +14,8 @@ void TopoReplanFSM::init(ros::NodeHandle& nh) {
   nh.param("fsm/thresh_no_replan", replan_distance_threshold_, -1.0);
   nh.param("fsm/waypoint_num", waypoint_num_, -1);
   nh.param("fsm/act_map", act_map_, false);
+  bool enable_frontier_timer;
+  nh.param("fsm/enable_frontier_timer", enable_frontier_timer, true);
   for (int i = 0; i < waypoint_num_; i++) {
     nh.param("fsm/waypoint" + to_string(i) + "_x", waypoints_[i][0], -1.0);
     nh.param("fsm/waypoint" + to_string(i) + "_y", waypoints_[i][1], -1.0);
@@ -28,7 +30,9 @@ void TopoReplanFSM::init(ros::NodeHandle& nh) {
   /* callback */
   exec_timer_ = nh.createTimer(ros::Duration(0.01), &TopoReplanFSM::execFSMCallback, this);
   safety_timer_ = nh.createTimer(ros::Duration(0.05), &TopoReplanFSM::checkCollisionCallback, this);
-  // frontier_timer_ = nh.createTimer(ros::Duration(0.1), &TopoReplanFSM::frontierCallback, this);
+  if (enable_frontier_timer) {
+    frontier_timer_ = nh.createTimer(ros::Duration(0.1), &TopoReplanFSM::frontierCallback, this);
+  }
 
   waypoint_sub_ =
       nh.subscribe("/waypoint_generator/waypoints", 1, &TopoReplanFSM::waypointCallback, this);
