@@ -115,6 +115,10 @@ void FastPlannerManager::planYawActMap(const Eigen::Vector3d& start_yaw) {
 void FastPlannerManager::searchFrontier(const Eigen::Vector3d& p) {
   // show frontier for reference
   frontier_finder_->searchFrontiers();
+  frontier_finder_->getFrontiers(plan_data_.frontiers_);
+  frontier_finder_->getSurfaceVoxels(plan_data_.surface_voxels_);
+  frontier_finder_->getSurfaceNormals(
+      plan_data_.surface_normal_starts_, plan_data_.surface_normal_ends_, 0.3);
 }
 
 void FastPlannerManager::test() {

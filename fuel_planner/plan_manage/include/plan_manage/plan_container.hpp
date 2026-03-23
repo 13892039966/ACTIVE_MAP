@@ -255,6 +255,9 @@ public:
 
   // heading planning
   vector<vector<Eigen::Vector3d>> frontiers_;
+  vector<Eigen::Vector3d> surface_voxels_;
+  vector<Eigen::Vector3d> surface_normal_starts_;
+  vector<Eigen::Vector3d> surface_normal_ends_;
   vector<double> path_yaw_;
   double dt_yaw_;
   double dt_yaw_path_;

@@ -1,0 +1,14 @@
+<launch>
+    <arg name="config" default="$(find active_mapping)/config/airsim_mapping.yaml"/>
+    <arg name="benchmark_output_root" default="$(env HOME)/active_mapping_benchmarks"/>
+    <arg name="benchmark_topic" default="/active_mapping/backend_benchmark"/>
+
+    <!-- <include file="$(find active_mapping)/launch/airsim_mapping.launch">
+        <arg name="config" value="$(arg config)"/>
+    </include> -->
+
+    <node pkg="active_mapping" type="backend_benchmark_recorder.py" name="backend_benchmark_recorder" output="screen">
+        <param name="topic" value="$(arg benchmark_topic)"/>
+        <param name="output_root" value="$(arg benchmark_output_root)"/>
+    </node>
+</launch>

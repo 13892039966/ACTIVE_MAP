@@ -1,0 +1,91 @@
+<launch>
+    <!-- Global map -->
+    <arg name="global_frame_id" default="world"/>
+    <arg name="publish_freq" default="2.0"/>
+    <arg name="max_queue_size" default="2"/>
+    <arg name="publish_only_on_update" default="true"/>
+
+    <!-- AirSim frontend -->
+    <arg name="frontend_publish_rate" default="4.0"/>
+    <arg name="frontend_max_depth" default="3.0"/>
+    <arg name="frontend_decimation" default="4"/>
+    <arg name="frontend_voxel_size" default="0.05"/>
+    <arg name="enable_teleop" default="false"/>
+
+    <!-- Backend -->
+    <arg name="enable_backend_voxel_filter" default="false"/>
+    <arg name="backend_downsample_size" default="0.05"/>
+    <arg name="backend_max_depth" default="3.0"/>
+    <arg name="ikd_tree_downsample" default="false"/>
+
+    <!-- Texture analysis -->
+    <arg name="knn_k" default="15"/>
+    <arg name="knn_max_radius" default="0.12"/>
+    <arg name="min_valid_neighbors" default="5"/>
+    <arg name="analysis_frame_window" default="1"/>
+    <arg name="normal_angle_threshold_deg" default="20.0"/>
+    <arg name="plane_residual_threshold" default="0.03"/>
+    <arg name="low_texture_threshold" default="0.02"/>
+    <arg name="low_texture_downsample_size" default="0.15"/>
+    <arg name="debug_texture_stats" default="false"/>
+
+    <!-- Capture -->
+    <arg name="enable_viewpoint_capture" default="true"/>
+    <arg name="capture_output_dir" default="$(env HOME)/viewpoint_captures"/>
+    <arg name="capture_save_interval" default="0.5"/>
+    <arg name="capture_max_image_age" default="0.5"/>
+    <arg name="capture_skip_duplicate_images" default="true"/>
+    <arg name="capture_duplicate_preview_width" default="64"/>
+    <arg name="capture_duplicate_diff_threshold" default="2.0"/>
+
+    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen">
+        <param name="publish_rate" value="$(arg frontend_publish_rate)"/>
+        <param name="max_valid_depth" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf"
+          args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
+
+    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
+
+    <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb"
+          args="load rtabmap_util/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
+        <remap from="rgb/image" to="/airsim/rgb"/>
+        <remap from="depth/image" to="/airsim/depth"/>
+        <remap from="rgb/camera_info" to="/airsim/camera_info"/>
+        <remap from="cloud" to="/airsim/point_cloud"/>
+
+        <param name="decimation" type="int" value="$(arg frontend_decimation)"/>
+        <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
+        <param name="max_depth" type="double" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="active_mapping" type="active_mapping_node" name="active_mapping_backend"
+          output="screen">
+        <remap from="/cloud" to="/airsim/point_cloud"/>
+        <remap from="/global_map" to="/active_mapping/global_map"/>
+
+        <param name="global_frame_id" value="$(arg global_frame_id)"/>
+        <param name="publish_freq" value="$(arg publish_freq)"/>
+        <param name="max_queue_size" value="$(arg max_queue_size)"/>
+        <param name="publish_only_on_update" value="$(arg publish_only_on_update)"/>
+
+        <param name="enable_backend_voxel_filter" value="$(arg enable_backend_voxel_filter)"/>
+        <param name="downsample_size" value="$(arg backend_downsample_size)"/>
+        <param name="max_depth" value="$(arg backend_max_depth)"/>
+        <param name="ikd_tree_downsample" value="$(arg ikd_tree_downsample)"/>
+
+        <param name="knn_k" value="$(arg knn_k)"/>
+        <param name="knn_max_radius" value="$(arg knn_max_radius)"/>
+        <param name="min_valid_neighbors" value="$(arg min_valid_neighbors)"/>
+        <param name="analysis_frame_window" value="$(arg analysis_frame_window)"/>
+        <param name="normal_angle_threshold_deg" value="$(arg normal_angle_threshold_deg)"/>
+        <param name="plane_residual_threshold" value="$(arg plane_residual_threshold)"/>
+        <param name="low_texture_threshold" value="$(arg low_texture_threshold)"/>
+        <param name="low_texture_downsample_size" value="$(arg low_texture_downsample_size)"/>
+        <param name="debug_texture_stats" value="$(arg debug_texture_stats)"/>
+    </node>
+
+    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+
+</launch>

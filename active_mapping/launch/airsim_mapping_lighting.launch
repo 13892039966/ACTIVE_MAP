@@ -1,0 +1,68 @@
+<launch>
+    <!-- Frames and publishing -->
+    <arg name="global_frame_id" default="world"/>
+    <arg name="publish_freq" default="10.0"/>
+    <arg name="max_queue_size" default="3"/>
+    <arg name="publish_only_on_update" default="true"/>
+    <arg name="launch_prefix" default=""/>
+
+    <!-- AirSim frontend -->
+    <arg name="frontend_publish_rate" default="4.0"/>
+    <arg name="frontend_max_depth" default="3.0"/>
+    <arg name="frontend_decimation" default="2"/>
+    <arg name="frontend_voxel_size" default="0.05"/>
+    <arg name="enable_teleop" default="false"/>
+
+    <!-- Backend filtering -->
+    <arg name="enable_backend_voxel_filter" default="false"/>
+    <arg name="backend_downsample_size" default="0.05"/>
+    <arg name="backend_max_depth" default="20.0"/>
+    <arg name="ikd_tree_downsample" default="false"/>
+
+    <!-- Color texture analysis -->
+    <arg name="knn_k" default="15"/>
+    <arg name="compute_normals" default="false"/>
+
+    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen">
+        <param name="publish_rate" value="$(arg frontend_publish_rate)"/>
+        <param name="max_valid_depth" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf"
+          args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
+
+    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
+
+    <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb"
+          args="load rtabmap_util/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
+        <remap from="rgb/image"       to="/airsim/rgb"/>
+        <remap from="depth/image"     to="/airsim/depth"/>
+        <remap from="rgb/camera_info" to="/airsim/camera_info"/>
+        <remap from="cloud"           to="/airsim/point_cloud"/>
+
+        <param name="decimation" type="int" value="$(arg frontend_decimation)"/>
+        <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
+        <param name="max_depth" type="double" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="active_mapping" type="active_mapping_node" name="active_mapping_backend"
+          output="screen" launch-prefix="$(arg launch_prefix)">
+        <remap from="/cloud"      to="/airsim/point_cloud"/>
+        <remap from="/global_map" to="/active_mapping/global_map"/>
+
+        <param name="global_frame_id" value="$(arg global_frame_id)" />
+        <param name="publish_freq" value="$(arg publish_freq)" />
+        <param name="max_queue_size" value="$(arg max_queue_size)" />
+        <param name="publish_only_on_update" value="$(arg publish_only_on_update)" />
+
+        <param name="enable_backend_voxel_filter" value="$(arg enable_backend_voxel_filter)" />
+        <param name="downsample_size" value="$(arg backend_downsample_size)" />
+        <param name="max_depth" value="$(arg backend_max_depth)" />
+        <param name="ikd_tree_downsample" value="$(arg ikd_tree_downsample)" />
+
+        <param name="knn_k" value="$(arg knn_k)" />
+        <param name="compute_normals" value="$(arg compute_normals)" />
+    </node>
+
+    <node pkg="active_mapping" type="airsim_teleop.py"  name="airsim_teleop" output="screen" />
+</launch>

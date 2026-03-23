@@ -39,6 +39,12 @@ FrontierFinder::FrontierFinder(const EDTEnvironment::Ptr& edt, ros::NodeHandle& 
   nh.param("frontier/min_visib_num", min_visib_num_, -1);
   nh.param("frontier/min_view_finish_fraction", min_view_finish_fraction_, -1.0);
 
+  nh.param("surface/neighbor_type", surface_neighbor_type_, 6);
+  nh.param("surface/min_expose_score", min_surface_expose_score_, 1);
+  nh.param("surface/search_inflate_xy", surface_search_inflate_xy_, 1.0);
+  nh.param("surface/search_inflate_z", surface_search_inflate_z_, 0.5);
+  nh.param("surface/treat_unknown_as_exposed", treat_unknown_as_exposed_, true);
+
   raycaster_.reset(new RayCaster);
   resolution_ = edt_env_->sdf_map_->getResolution();
   Eigen::Vector3d origin, size;
@@ -116,6 +122,7 @@ void FrontierFinder::searchFrontiers() {
         }
       }
   splitLargeFrontiers(tmp_frontiers_);
+  extractSurfaceCandidates();
 
   ROS_WARN_THROTTLE(5.0, "Frontier t: %lf", (ros::Time::now() - t1).toSec());
 }
@@ -161,6 +168,69 @@ void FrontierFinder::expandFrontier(
     computeFrontierInfo(frontier);
     tmp_frontiers_.push_back(frontier);
   }
+}
+
+
+void FrontierFinder::extractSurfaceCandidates() {
+  surface_voxels_.clear();
+
+  Vector3d update_min, update_max;
+  edt_env_->sdf_map_->getUpdatedBox(update_min, update_max, false);
+
+  Vector3d search_min = update_min - Vector3d(surface_search_inflate_xy_, surface_search_inflate_xy_,
+                                              surface_search_inflate_z_);
+  Vector3d search_max = update_max + Vector3d(surface_search_inflate_xy_, surface_search_inflate_xy_,
+                                              surface_search_inflate_z_);
+  Vector3d box_min, box_max;
+  edt_env_->sdf_map_->getBox(box_min, box_max);
+  for (int k = 0; k < 3; ++k) {
+    search_min[k] = max(search_min[k], box_min[k]);
+    search_max[k] = min(search_max[k], box_max[k]);
+  }
+
+  Eigen::Vector3i min_id, max_id;
+  edt_env_->sdf_map_->posToIndex(search_min, min_id);
+  edt_env_->sdf_map_->posToIndex(search_max, max_id);
+
+  for (int x = min_id(0); x <= max_id(0); ++x)
+    for (int y = min_id(1); y <= max_id(1); ++y)
+      for (int z = min_id(2); z <= max_id(2); ++z) {
+        SurfaceVoxel surface;
+        if (isExposedSurface(Eigen::Vector3i(x, y, z), surface)) surface_voxels_.push_back(surface);
+      }
+}
+
+bool FrontierFinder::isExposedSurface(const Eigen::Vector3i& voxel, SurfaceVoxel& surface) {
+  if (!inmap(voxel) || edt_env_->sdf_map_->getOccupancy(voxel) != SDFMap::OCCUPIED) return false;
+
+  vector<Eigen::Vector3i> nbrs = surface_neighbor_type_ == 26 ? allNeighbors(voxel) : sixNeighbors(voxel);
+
+  int expose_score = 0;
+  Vector3d normal = Vector3d::Zero();
+  Vector3d center;
+  edt_env_->sdf_map_->indexToPos(voxel, center);
+
+  for (const auto& nbr : nbrs) {
+    if (!inmap(nbr)) continue;
+
+    const int occ = edt_env_->sdf_map_->getOccupancy(nbr);
+    const bool exposed = occ == SDFMap::FREE || (treat_unknown_as_exposed_ && occ == SDFMap::UNKNOWN);
+    if (!exposed) continue;
+
+    Vector3d nbr_pos;
+    edt_env_->sdf_map_->indexToPos(nbr, nbr_pos);
+    normal += (nbr_pos - center).normalized();
+    ++expose_score;
+  }
+
+  if (expose_score < min_surface_expose_score_ || normal.norm() < 1e-3) return false;
+
+  surface.idx_ = voxel;
+  surface.pos_ = center;
+  surface.normal_ = normal.normalized();
+  surface.adr_ = toadr(voxel);
+  surface.expose_score_ = expose_score;
+  return true;
 }
 
 void FrontierFinder::splitLargeFrontiers(list<Frontier>& frontiers) {
@@ -502,6 +572,22 @@ void FrontierFinder::getFrontierBoxes(vector<pair<Eigen::Vector3d, Eigen::Vector
     Vector3d center = (frontier.box_max_ + frontier.box_min_) * 0.5;
     Vector3d scale = frontier.box_max_ - frontier.box_min_;
     boxes.push_back(make_pair(center, scale));
+  }
+}
+
+void FrontierFinder::getSurfaceVoxels(vector<Vector3d>& voxels) {
+  voxels.clear();
+  for (const auto& surface : surface_voxels_)
+    voxels.push_back(surface.pos_);
+}
+
+void FrontierFinder::getSurfaceNormals(vector<Vector3d>& starts, vector<Vector3d>& ends,
+                                       const double& scale) {
+  starts.clear();
+  ends.clear();
+  for (const auto& surface : surface_voxels_) {
+    starts.push_back(surface.pos_);
+    ends.push_back(surface.pos_ + scale * surface.normal_);
   }
 }
 

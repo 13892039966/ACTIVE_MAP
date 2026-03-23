@@ -15,6 +15,9 @@ class AirSimTeleop:
         self.airsim_port = int(rospy.get_param("~airsim_port", 41451))
         self.airsim_timeout_sec = float(rospy.get_param("~airsim_timeout_sec", 60.0))
         self.airsim_retry_interval = float(rospy.get_param("~airsim_retry_interval", 1.0))
+        self.linear_scale = float(rospy.get_param("~linear_scale", 0.5))
+        self.angular_scale = float(rospy.get_param("~angular_scale", 0.5))
+        self.pitch_scale = float(rospy.get_param("~pitch_scale", 0.5))
         self.client = self._connect_airsim_with_retry()
         
         # 获取相机的初始出生点和姿态
@@ -38,6 +41,10 @@ class AirSimTeleop:
         self.reset_attitude_requested = False
         
         rospy.Subscriber('/cmd_vel', Twist, self.cmd_callback)
+        rospy.loginfo("AirSim teleop scales: linear=%.2f angular=%.2f pitch=%.2f",
+                      self.linear_scale,
+                      self.angular_scale,
+                      self.pitch_scale)
         rospy.loginfo("🎮 AirSim Teleop 驱动已就绪 (支持 6DoF 飞行)！")
 
     def _connect_airsim_with_retry(self):
@@ -61,12 +68,12 @@ class AirSimTeleop:
         if msg.angular.x > 0.5:
             self.reset_attitude_requested = True
             return
-        self.vx = msg.linear.x      
-        self.vy = msg.linear.y      
-        self.vz = msg.linear.z      
-        self.vyaw = msg.angular.z   
+        self.vx = msg.linear.x * self.linear_scale
+        self.vy = msg.linear.y * self.linear_scale
+        self.vz = msg.linear.z * self.linear_scale
+        self.vyaw = msg.angular.z * self.angular_scale
         # 🌟 接收 Pitch 速度指令
-        self.vpitch = msg.angular.y 
+        self.vpitch = msg.angular.y * self.pitch_scale
 
     def publish_current_pose(self):
         pose = airsim.Pose()

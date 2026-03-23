@@ -429,14 +429,46 @@ template <typename PointType>
 void KD_TREE<PointType>::Box_Search(const BoxPointType &Box_of_Point, PointVector &Storage)
 {
     Storage.clear();
-    Search_by_range(Root_Node, Box_of_Point, Storage);
+    if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node){
+        Search_by_range(Root_Node, Box_of_Point, Storage);
+    } else {
+        pthread_mutex_lock(&search_flag_mutex);
+        while (search_mutex_counter == -1)
+        {
+            pthread_mutex_unlock(&search_flag_mutex);
+            usleep(1);
+            pthread_mutex_lock(&search_flag_mutex);
+        }
+        search_mutex_counter += 1;
+        pthread_mutex_unlock(&search_flag_mutex);
+        Search_by_range(Root_Node, Box_of_Point, Storage);
+        pthread_mutex_lock(&search_flag_mutex);
+        search_mutex_counter -= 1;
+        pthread_mutex_unlock(&search_flag_mutex);
+    }
 }
 
 template <typename PointType>
 void KD_TREE<PointType>::Radius_Search(PointType point, const float radius, PointVector &Storage)
 {
     Storage.clear();
-    Search_by_radius(Root_Node, point, radius, Storage);
+    if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node){
+        Search_by_radius(Root_Node, point, radius, Storage);
+    } else {
+        pthread_mutex_lock(&search_flag_mutex);
+        while (search_mutex_counter == -1)
+        {
+            pthread_mutex_unlock(&search_flag_mutex);
+            usleep(1);
+            pthread_mutex_lock(&search_flag_mutex);
+        }
+        search_mutex_counter += 1;
+        pthread_mutex_unlock(&search_flag_mutex);
+        Search_by_radius(Root_Node, point, radius, Storage);
+        pthread_mutex_lock(&search_flag_mutex);
+        search_mutex_counter -= 1;
+        pthread_mutex_unlock(&search_flag_mutex);
+    }
 }
 
 // wgh 关键入口函数
@@ -464,7 +496,7 @@ int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on)
             mid_point.y = Box_of_Point.vertex_min[1] + (Box_of_Point.vertex_max[1]-Box_of_Point.vertex_min[1])/2.0;
             mid_point.z = Box_of_Point.vertex_min[2] + (Box_of_Point.vertex_max[2]-Box_of_Point.vertex_min[2])/2.0;
             Downsample_Storage.clear();
-            Search_by_range(Root_Node, Box_of_Point, Downsample_Storage);
+            Box_Search(Box_of_Point, Downsample_Storage);
             min_dist = calc_dist(PointToAdd[i],mid_point);
             downsample_result = PointToAdd[i]; 
             for (std::size_t index = 0; index < Downsample_Storage.size(); index++){

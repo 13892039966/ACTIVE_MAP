@@ -1,32 +1,44 @@
 <launch>
     <!-- FUEL backend: consume frontend topics directly. -->
-    <arg name="frontend_max_depth" default="10.0"/>
+    <arg name="frontend_max_depth" default="15.0"/>
     <arg name="virtual_ceil_height" default="-1.0"/>
 
     <arg name="map_size_x" default="50.0"/>
     <arg name="map_size_y" default="50.0"/>
     <arg name="map_size_z" default="30.0"/>
     <arg name="ground_height" default="-10.0"/>
-    <arg name="box_min_x" default="$(eval -0.5 * float(arg('map_size_x')))"/>
-    <arg name="box_min_y" default="$(eval -0.5 * float(arg('map_size_y')))"/>
-    <arg name="box_min_z" default="$(arg ground_height)"/>
-    <arg name="box_max_x" default="$(eval 0.5 * float(arg('map_size_x')))"/>
-    <arg name="box_max_y" default="$(eval 0.5 * float(arg('map_size_y')))"/>
-    <arg name="box_max_z" default="$(eval float(arg('ground_height')) + float(arg('map_size_z')))"/>
+    <arg name="box_min_x" default="-25.0"/>
+    <arg name="box_min_y" default="-25.0"/>
+    <arg name="box_min_z" default="-2.0"/>
+    <arg name="box_max_x" default="25.0"/>
+    <arg name="box_max_y" default="25.0"/>
+    <arg name="box_max_z" default="8.0"/>
+
     <arg name="init_x" default="0.0"/>
     <arg name="init_y" default="0.0"/>
     <arg name="init_z" default="1.0"/>
     <arg name="max_vel" default="2.0"/>
     <arg name="max_acc" default="2.0"/>
-    <arg name="frontier_min_candidate_dist" default="0.4"/>
-    <arg name="frontier_min_candidate_clearance" default="0.35"/>
+    <arg name="frontier_min_candidate_dist" default="1.0"/>
+    <arg name="frontier_min_candidate_clearance" default="1.0"/>
     <arg name="frontier_candidate_dphi_deg" default="10.0"/>
     <arg name="frontier_candidate_rnum" default="5"/>
     <arg name="frontier_candidate_rmin" default="0.8"/>
     <arg name="frontier_candidate_rmax" default="1.4"/>
+    <arg name="sdf_obstacles_inflation" default="0.30"/>
+    <arg name="planner_clearance_threshold" default="0.2"/>
+    <arg name="optimization_safe_distance" default="0.5"/>
     <arg name="show_viewpoints" default="false"/>
     <arg name="show_trajectory" default="true"/>
     <arg name="show_next_goal" default="true"/>
+    <!-- 拍照参数 -->
+    <arg name="enable_viewpoint_capture" default="true"/>
+    <arg name="capture_output_dir" default="$(env HOME)/viewpoint_captures"/>
+    <arg name="capture_save_interval" default="0.3"/>
+    <arg name="capture_max_image_age" default="0.5"/>
+    <arg name="capture_skip_duplicate_images" default="true"/>
+    <arg name="capture_duplicate_preview_width" default="64"/>
+    <arg name="capture_duplicate_diff_threshold" default="2.0"/>
 
     <include file="$(find exploration_manager)/launch/algorithm.xml">
         <arg name="map_size_x_" value="$(arg map_size_x)"/>
@@ -89,6 +101,10 @@
         <param name="perception_utils/vis_dist" value="1.0" type="double"/>
     </node>
 
+    <param name="sdf_map/obstacles_inflation" value="$(arg sdf_obstacles_inflation)"/>
+    <param name="manager/clearance_threshold" value="$(arg planner_clearance_threshold)"/>
+    <param name="optimization/dist0" value="$(arg optimization_safe_distance)"/>
+
     <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
         <remap from="~odom" to="/airsim/odom"/>
         <remap from="~goal" to="/move_base_simple/goal"/>
@@ -104,5 +120,19 @@
         <param name="feedforward_dt" value="0.0333333333"/>
         <param name="cmd_timeout" value="0.2"/>
         <param name="max_vel" value="3.0"/>
+    </node>
+
+    <node if="$(arg enable_viewpoint_capture)"
+          pkg="active_mapping"
+          name="capture_on_viewpoint"
+          type="capture_on_viewpoint.py"
+          output="screen">
+        <param name="image_topic" value="/airsim/rgb"/>
+        <param name="output_dir" value="$(arg capture_output_dir)"/>
+        <param name="save_interval" value="$(arg capture_save_interval)"/>
+        <param name="max_image_age" value="$(arg capture_max_image_age)"/>
+        <param name="skip_duplicate_images" value="$(arg capture_skip_duplicate_images)"/>
+        <param name="duplicate_preview_width" value="$(arg capture_duplicate_preview_width)"/>
+        <param name="duplicate_diff_threshold" value="$(arg capture_duplicate_diff_threshold)"/>
     </node>
 </launch>

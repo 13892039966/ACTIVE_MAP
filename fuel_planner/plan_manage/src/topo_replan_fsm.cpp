@@ -330,6 +330,9 @@ void TopoReplanFSM::frontierCallback(const ros::TimerEvent& e) {
   if (!have_odom_) return;
   planner_manager_->searchFrontier(odom_pos_);
   visualization_->drawFrontier(planner_manager_->plan_data_.frontiers_);
+  visualization_->drawSurfaceVoxels(planner_manager_->plan_data_.surface_voxels_,
+                                    planner_manager_->plan_data_.surface_normal_starts_,
+                                    planner_manager_->plan_data_.surface_normal_ends_);
 }
 
 bool TopoReplanFSM::callSearchAndOptimization() {

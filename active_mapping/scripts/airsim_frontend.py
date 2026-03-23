@@ -21,7 +21,7 @@ class AirSimFrontend:
         # 1. 基础配置
         self.vehicle_name = "Drone1"
         self.cam_name = "front"
-        self.freq = 15.0  # 频率控制在 15Hz，兼顾流畅度与性能
+        self.freq = float(rospy.get_param("~publish_rate", 10.0))
         self.airsim_host = rospy.get_param("~airsim_host", "127.0.0.1")
         self.airsim_port = int(rospy.get_param("~airsim_port", 41451))
         self.airsim_timeout_sec = float(rospy.get_param("~airsim_timeout_sec", 60.0))

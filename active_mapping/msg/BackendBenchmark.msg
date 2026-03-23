@@ -1,0 +1,14 @@
+std_msgs/Header header
+float64 window_duration_sec
+uint32 processed_count
+uint32 queue_drop_count
+float64 cloud_age_mean
+float64 cloud_age_max
+float64 support_ms
+float64 search_ms
+float64 score_ms
+float64 total_ms
+float64 raw_neighbors_mean
+float64 zeroed_ratio
+float64 edge_mean
+float64 texture_mean

@@ -28,10 +28,21 @@ class CustomKeyboardTeleop:
         rospy.loginfo("---------------------------")
         rospy.loginfo("⬆️ ⬇️ ⬅️ ➡️ : 前/后/左/右平移")
         rospy.loginfo("PageUp / PageDn : 上升 / 下降")
-        rospy.loginfo("A / D : 向左转 / 向右转 (Yaw)")
-        rospy.loginfo("W / S : 抬头 / 低头 (Pitch)")
-        rospy.loginfo("R : 姿态回正 (恢复初始 Yaw/Pitch/Roll)")
+        rospy.loginfo("A / D 或 Home / End : 向左转 / 向右转 (Yaw)")
+        rospy.loginfo("W / S 或 Insert / Delete : 抬头 / 低头 (Pitch)")
+        rospy.loginfo("R 或 Backspace : 姿态回正 (恢复初始 Yaw/Pitch/Roll)")
         rospy.loginfo("按 ESC 键退出")
+
+    def _key_char(self, key):
+        if not hasattr(key, 'char') or key.char is None:
+            return None
+        return key.char.lower()
+
+    def _publish_reset(self):
+        reset_cmd = Twist()
+        reset_cmd.angular.x = 1.0
+        self.pub.publish(reset_cmd)
+        rospy.loginfo("姿态回正请求已发送")
 
     def on_press(self, key):
         if key == Key.up:          self.active_keys['forward'] = True
@@ -40,17 +51,20 @@ class CustomKeyboardTeleop:
         elif key == Key.right:     self.active_keys['right'] = True
         elif key == Key.page_up:   self.active_keys['up'] = True
         elif key == Key.page_down: self.active_keys['down'] = True
-        elif hasattr(key, 'char'):
-            if key.char == 'a':    self.active_keys['turn_left'] = True
-            elif key.char == 'd':  self.active_keys['turn_right'] = True
-            # 🌟 新增 W 和 S 键监听
-            elif key.char == 'w':  self.active_keys['pitch_up'] = True
-            elif key.char == 's':  self.active_keys['pitch_down'] = True
-            elif key.char == 'r':
-                reset_cmd = Twist()
-                reset_cmd.angular.x = 1.0
-                self.pub.publish(reset_cmd)
-                rospy.loginfo("姿态回正请求已发送")
+        elif key == Key.home:      self.active_keys['turn_left'] = True
+        elif key == Key.end:       self.active_keys['turn_right'] = True
+        elif key == Key.insert:    self.active_keys['pitch_up'] = True
+        elif key == Key.delete:    self.active_keys['pitch_down'] = True
+        elif key == Key.backspace:
+            self._publish_reset()
+        else:
+            char = self._key_char(key)
+            if char == 'a':        self.active_keys['turn_left'] = True
+            elif char == 'd':      self.active_keys['turn_right'] = True
+            elif char == 'w':      self.active_keys['pitch_up'] = True
+            elif char == 's':      self.active_keys['pitch_down'] = True
+            elif char == 'r':
+                self._publish_reset()
 
     def on_release(self, key):
         if key == Key.up:          self.active_keys['forward'] = False
@@ -59,14 +73,18 @@ class CustomKeyboardTeleop:
         elif key == Key.right:     self.active_keys['right'] = False
         elif key == Key.page_up:   self.active_keys['up'] = False
         elif key == Key.page_down: self.active_keys['down'] = False
-        elif hasattr(key, 'char'):
-            if key.char == 'a':    self.active_keys['turn_left'] = False
-            elif key.char == 'd':  self.active_keys['turn_right'] = False
-            # 🌟 新增 W 和 S 键释放
-            elif key.char == 'w':  self.active_keys['pitch_up'] = False
-            elif key.char == 's':  self.active_keys['pitch_down'] = False
+        elif key == Key.home:      self.active_keys['turn_left'] = False
+        elif key == Key.end:       self.active_keys['turn_right'] = False
+        elif key == Key.insert:    self.active_keys['pitch_up'] = False
+        elif key == Key.delete:    self.active_keys['pitch_down'] = False
         elif key == Key.esc:
             return False
+        else:
+            char = self._key_char(key)
+            if char == 'a':        self.active_keys['turn_left'] = False
+            elif char == 'd':      self.active_keys['turn_right'] = False
+            elif char == 'w':      self.active_keys['pitch_up'] = False
+            elif char == 's':      self.active_keys['pitch_down'] = False
 
     def run(self):
         listener = Listener(on_press=self.on_press, on_release=self.on_release)

@@ -1,0 +1,78 @@
+# 前端参数：
+# AirSim RGB/深度获取、发布频率与深度到点云的有效范围。
+airsim_frontend:
+  publish_rate: 4.0
+  airsim_host: 127.0.0.1
+  airsim_port: 41451
+  airsim_timeout_sec: 60.0
+  airsim_retry_interval: 1.0
+  # 深度值大于此值将在生成点云前被视为无效。
+  max_valid_depth: 5.0
+
+# 后端参数：
+# 每帧彩色点云分析与残差图构建。
+active_mapping_backend:
+  global_frame_id: world
+  publish_freq: 2.0
+  max_queue_size: 3
+  publish_only_on_update: true
+
+  # 在纹理/残差分析之前的预滤波。
+  enable_backend_voxel_filter: false
+  downsample_size: 0.05
+  # 仅分析距离传感器在此 3D 距离内的点。
+  max_depth: 5.0
+  ikd_tree_downsample: false
+
+  # 同一表面邻域构建。
+  knn_k: 10
+  # 半径搜索尺度。数值越小结果越干净，但更容易丢失邻居。
+  knn_max_radius: 0.1
+  # 除非需要多帧支持，否则保持为 1。
+  analysis_frame_window: 1
+
+  # 低纹理地图稀疏化。
+  low_texture_threshold: 0.01
+  low_texture_downsample_size: 0.10
+
+  # 调试日志：邻居统计与时间分解。
+  debug_texture_stats: true
+  # 结构化 benchmark topic，供 recorder 节点自动写文件。
+  publish_benchmark: true
+
+# 遥控参数：
+# 缩放 /cmd_vel 输入，降低鼠标/键盘飞行速度与视角变化速度。
+airsim_teleop:
+  # 平移速度缩放，越小飞得越慢。
+  linear_scale: 1.0
+  # 航向角速度缩放，越小转向越慢。
+  angular_scale: 1.0
+  # 俯仰角速度缩放，越小镜头抬头低头越慢。
+  pitch_scale: 0.5
+
+# Recorder 参数：
+# 直接从 AirSim 抓图像与位姿，点云通过 TF 变到 world 后累计导出 COLMAP 兼容数据。
+airsim_capture_syncd:
+  vehicle_name: Drone1
+  cam_name: front
+  capture_interval: 0.3
+  camera_fov_deg: 90.0
+  airsim_host: 127.0.0.1
+  airsim_port: 41451
+  airsim_timeout_sec: 60.0
+  airsim_retry_interval: 1.0
+
+  point_cloud_topic: /airsim/point_cloud
+  global_frame_id: world
+  cloud_collect_interval: 0.3
+  cloud_stride: 4
+  cloud_voxel_size: 0.03
+  max_cloud_depth: 5.0
+
+  max_frames: 0
+  min_translation: 0.02
+  min_rotation_deg: 1.0
+
+  camera_axis_variant: swap_yz_flip_y
+  pose_rotation_semantics: rwc
+

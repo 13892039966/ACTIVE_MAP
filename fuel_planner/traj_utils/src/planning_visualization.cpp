@@ -583,6 +583,19 @@ void PlanningVisualization::drawFrontier(const vector<vector<Eigen::Vector3d>>& 
   last_frontier_num_ = frontiers.size();
 }
 
+void PlanningVisualization::drawSurfaceVoxels(const vector<Eigen::Vector3d>& surfaces,
+                                              const vector<Eigen::Vector3d>& normal_starts,
+                                              const vector<Eigen::Vector3d>& normal_ends) {
+  drawCubes(surfaces, 0.1, Eigen::Vector4d(0.1, 0.6, 1.0, 0.85), "surface_voxel", 0, 4);
+  if (!normal_starts.empty() && normal_starts.size() == normal_ends.size()) {
+    drawLines(normal_starts, normal_ends, 0.02, Eigen::Vector4d(1.0, 0.7, 0.1, 0.9),
+              "surface_normal", 1, 4);
+  } else {
+    vector<Eigen::Vector3d> empty;
+    drawLines(empty, empty, 0.02, Eigen::Vector4d(1.0, 0.7, 0.1, 0.9), "surface_normal", 1, 4);
+  }
+}
+
 void PlanningVisualization::drawYawTraj(NonUniformBspline& pos, NonUniformBspline& yaw,
                                         const double& dt) {
   double duration = pos.getTimeSum();

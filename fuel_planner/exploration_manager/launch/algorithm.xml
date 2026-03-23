@@ -137,6 +137,13 @@
     <param name="frontier/min_visib_num" value="$(arg frontier_min_visib_num)" type="int"/>
     <param name="frontier/min_view_finish_fraction" value="0.2" type="double"/>
 
+
+    <!-- Surface candidate extraction -->
+    <param name="surface/neighbor_type" value="6" type="int"/>
+    <param name="surface/min_expose_score" value="1" type="int"/>
+    <param name="surface/search_inflate_xy" value="1.0" type="double"/>
+    <param name="surface/search_inflate_z" value="0.5" type="double"/>
+    <param name="surface/treat_unknown_as_exposed" value="true" type="bool"/>
     <!-- Perception utils -->
     <param name="perception_utils/top_angle" value="0.56125" type="double"/>;
     <param name="perception_utils/left_angle" value="0.69222" type="double"/>;

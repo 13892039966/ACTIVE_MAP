@@ -117,6 +117,9 @@ public:
   void drawVisibConstraint(const Eigen::MatrixXd& pts, const vector<VisiblePair>& pairs);
   void drawViewConstraint(const ViewConstraint& vc);
   void drawFrontier(const vector<vector<Eigen::Vector3d>>& frontiers);
+  void drawSurfaceVoxels(const vector<Eigen::Vector3d>& surfaces,
+                         const vector<Eigen::Vector3d>& normal_starts = {},
+                         const vector<Eigen::Vector3d>& normal_ends = {});
   void drawYawTraj(NonUniformBspline& pos, NonUniformBspline& yaw, const double& dt);
   void drawYawPath(NonUniformBspline& pos, const vector<double>& yaw, const double& dt);
 };

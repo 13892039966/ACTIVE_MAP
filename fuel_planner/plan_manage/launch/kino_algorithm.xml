@@ -158,6 +158,13 @@
     <param name="bspline/limit_acc" value="$(arg max_acc)" type="double"/>
     <param name="bspline/limit_ratio" value="1.1" type="double"/>
 
+
+    <!-- Surface candidate extraction -->
+    <param name="surface/neighbor_type" value="6" type="int"/>
+    <param name="surface/min_expose_score" value="1" type="int"/>
+    <param name="surface/search_inflate_xy" value="1.0" type="double"/>
+    <param name="surface/search_inflate_z" value="0.5" type="double"/>
+    <param name="surface/treat_unknown_as_exposed" value="true" type="bool"/>
   </node>
 
 </launch>

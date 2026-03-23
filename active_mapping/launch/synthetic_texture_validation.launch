@@ -1,0 +1,73 @@
+<launch>
+    <arg name="scene_type" default="edge_plane"/>
+    <arg name="publish_rate" default="1.0"/>
+    <arg name="global_frame_id" default="world"/>
+    <arg name="grid_step" default="0.04"/>
+    <arg name="width" default="2.0"/>
+    <arg name="height" default="1.2"/>
+    <arg name="tilt_angle_deg" default="25.0"/>
+    <arg name="secondary_tilt_angle_deg" default="-20.0"/>
+    <arg name="depth_offset" default="0.35"/>
+    <arg name="plane_gap" default="0.06"/>
+    <arg name="checker_size" default="0.16"/>
+    <arg name="stripe_width" default="0.16"/>
+    <arg name="publish_freq" default="2.0"/>
+    <arg name="max_queue_size" default="2"/>
+    <arg name="publish_only_on_update" default="true"/>
+
+    <arg name="enable_backend_voxel_filter" default="false"/>
+    <arg name="backend_downsample_size" default="0.05"/>
+    <arg name="backend_max_depth" default="5.0"/>
+    <arg name="ikd_tree_downsample" default="false"/>
+
+    <arg name="knn_k" default="15"/>
+    <arg name="knn_max_radius" default="0.12"/>
+    <arg name="min_valid_neighbors" default="5"/>
+    <arg name="analysis_frame_window" default="1"/>
+    <arg name="normal_angle_threshold_deg" default="20.0"/>
+    <arg name="plane_residual_threshold" default="0.03"/>
+    <arg name="low_texture_threshold" default="0.02"/>
+    <arg name="low_texture_downsample_size" default="0.15"/>
+    <arg name="debug_texture_stats" default="true"/>
+
+    <node pkg="active_mapping" type="synthetic_texture_scene_publisher.py" name="synthetic_texture_scene_publisher" output="screen">
+        <param name="topic" value="/synthetic/point_cloud"/>
+        <param name="frame_id" value="$(arg global_frame_id)"/>
+        <param name="scene_type" value="$(arg scene_type)"/>
+        <param name="publish_rate" value="$(arg publish_rate)"/>
+        <param name="grid_step" value="$(arg grid_step)"/>
+        <param name="width" value="$(arg width)"/>
+        <param name="height" value="$(arg height)"/>
+        <param name="tilt_angle_deg" value="$(arg tilt_angle_deg)"/>
+        <param name="secondary_tilt_angle_deg" value="$(arg secondary_tilt_angle_deg)"/>
+        <param name="depth_offset" value="$(arg depth_offset)"/>
+        <param name="plane_gap" value="$(arg plane_gap)"/>
+        <param name="checker_size" value="$(arg checker_size)"/>
+        <param name="stripe_width" value="$(arg stripe_width)"/>
+    </node>
+
+    <node pkg="active_mapping" type="active_mapping_node" name="active_mapping_backend" output="screen">
+        <remap from="/cloud" to="/synthetic/point_cloud"/>
+        <remap from="/global_map" to="/active_mapping/global_map"/>
+
+        <param name="global_frame_id" value="$(arg global_frame_id)"/>
+        <param name="publish_freq" value="$(arg publish_freq)"/>
+        <param name="max_queue_size" value="$(arg max_queue_size)"/>
+        <param name="publish_only_on_update" value="$(arg publish_only_on_update)"/>
+
+        <param name="enable_backend_voxel_filter" value="$(arg enable_backend_voxel_filter)"/>
+        <param name="downsample_size" value="$(arg backend_downsample_size)"/>
+        <param name="max_depth" value="$(arg backend_max_depth)"/>
+        <param name="ikd_tree_downsample" value="$(arg ikd_tree_downsample)"/>
+
+        <param name="knn_k" value="$(arg knn_k)"/>
+        <param name="knn_max_radius" value="$(arg knn_max_radius)"/>
+        <param name="min_valid_neighbors" value="$(arg min_valid_neighbors)"/>
+        <param name="analysis_frame_window" value="$(arg analysis_frame_window)"/>
+        <param name="normal_angle_threshold_deg" value="$(arg normal_angle_threshold_deg)"/>
+        <param name="plane_residual_threshold" value="$(arg plane_residual_threshold)"/>
+        <param name="low_texture_threshold" value="$(arg low_texture_threshold)"/>
+        <param name="low_texture_downsample_size" value="$(arg low_texture_downsample_size)"/>
+        <param name="debug_texture_stats" value="$(arg debug_texture_stats)"/>
+    </node>
+</launch>

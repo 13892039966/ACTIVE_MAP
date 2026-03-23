@@ -1,0 +1,51 @@
+<launch>
+    <!-- AirSim frontend -->
+    <arg name="frontend_publish_rate" default="4.0"/>
+    <arg name="frontend_max_depth" default="15.0"/>
+    <arg name="frontend_decimation" default="4"/>
+    <arg name="frontend_voxel_size" default="0.05"/>
+    <arg name="enable_teleop" default="false"/>
+
+    <!-- Capture -->
+    <arg name="enable_viewpoint_capture" default="true"/>
+    <arg name="capture_output_dir" default="$(env HOME)/viewpoint_captures"/>
+    <arg name="capture_save_interval" default="0.5"/>
+    <arg name="capture_max_image_age" default="0.5"/>
+    <arg name="capture_skip_duplicate_images" default="true"/>
+
+    <node pkg="active_mapping" type="airsim_frontend.py" nam`e="airsim_frontend" output="screen">
+        <param name="publish_rate" value="$(arg frontend_publish_rate)"/>
+        <param name="max_valid_depth" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf"
+          args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
+
+    <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
+
+    <node pkg="nodelet" type="nodelet" name="point_cloud_xyzrgb"
+          args="load rtabmap_util/point_cloud_xyzrgb vision_nodelet_manager" output="screen">
+        <remap from="rgb/image" to="/airsim/rgb"/>
+        <remap from="depth/image" to="/airsim/depth"/>
+        <remap from="rgb/camera_info" to="/airsim/camera_info"/>
+        <remap from="cloud" to="/airsim/point_cloud"/>
+
+        <param name="decimation" type="int" value="$(arg frontend_decimation)"/>
+        <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
+        <param name="max_depth" type="double" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+
+    <!-- <node if="$(arg enable_viewpoint_capture)"
+          pkg="active_mapping"
+          name="capture_on_viewpoint"
+          type="capture_on_viewpoint.py"
+          output="screen">
+        <param name="image_topic" value="/airsim/rgb"/>
+        <param name="output_dir" value="$(arg capture_output_dir)"/>
+        <param name="save_interval" value="$(arg capture_save_interval)"/>
+        <param name="max_image_age" value="$(arg capture_max_image_age)"/>
+        <param name="skip_duplicate_images" value="$(arg capture_skip_duplicate_images)"/>
+    </node> -->
+</launch>

@@ -1,18 +1,13 @@
 <launch>
     <rosparam command="load" file="$(find active_mapping)/config/airsim_mapping.yaml" />
 
-    <arg name="frontend_decimation" default="2"/>
-    <arg name="frontend_voxel_size" default="0.05"/>
-    <arg name="frontend_max_depth" default="5.0"/>
     <arg name="enable_teleop" default="true"/>
     <arg name="enable_capture" default="true"/>
-    <arg name="capture_output_dir" default="/home/xhy/mapping_GS/active_recon_ws/viewpoint_captures/mycolmap"/>
+    <arg name="capture_output_dir" default="/home/xhy/mapping_GS/active_recon_ws/viewpoint_captures/mycolmap_same_source"/>
     <arg name="camera_axis_variant" default="swap_yz_flip_y"/>
     <arg name="pose_rotation_semantics" default="rwc"/>
 
-    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen">
-        <param name="max_valid_depth" value="$(arg frontend_max_depth)"/>
-    </node>
+    <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen"/>
 
     <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_tf"
           args="0 0 0 -1.5708 0 -1.5708 base_link camera_optical_frame" />
@@ -25,12 +20,9 @@
         <remap from="depth/image"     to="/airsim/depth"/>
         <remap from="rgb/camera_info" to="/airsim/camera_info"/>
         <remap from="cloud"           to="/airsim/point_cloud"/>
-        <param name="decimation" type="int" value="$(arg frontend_decimation)"/>
-        <param name="voxel_size" type="double" value="$(arg frontend_voxel_size)"/>
-        <param name="max_depth"  type="double" value="$(arg frontend_max_depth)"/>
     </node>
 
-    <node if="$(arg enable_capture)" pkg="active_mapping" type="airsim_capture_syncd.py" name="airsim_capture_syncd" output="screen">
+    <node if="$(arg enable_capture)" pkg="active_mapping" type="airsim_capture_syncd_same_source.py" name="airsim_capture_syncd_same_source" output="screen">
         <param name="output_dir" value="$(arg capture_output_dir)"/>
         <param name="camera_axis_variant" value="$(arg camera_axis_variant)"/>
         <param name="pose_rotation_semantics" value="$(arg pose_rotation_semantics)"/>

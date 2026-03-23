@@ -1,0 +1,106 @@
+<launch>
+    <!-- Surface-candidate validation launch based on fuel_backend_only topic conventions. -->
+    <arg name="frontend_max_depth" default="10.0"/>
+    <arg name="virtual_ceil_height" default="-1.0"/>
+
+    <arg name="map_size_x" default="50.0"/>
+    <arg name="map_size_y" default="50.0"/>
+    <arg name="map_size_z" default="30.0"/>
+    <arg name="ground_height" default="-10.0"/>
+    <arg name="init_x" default="0.0"/>
+    <arg name="init_y" default="0.0"/>
+    <arg name="init_z" default="1.0"/>
+    <arg name="max_vel" default="2.0"/>
+    <arg name="max_acc" default="2.0"/>
+
+    <arg name="odom_topic" default="/airsim/odom"/>
+    <arg name="sensor_pose_topic" default="/airsim/pose"/>
+    <arg name="depth_topic" default="/unused_depth"/>
+    <arg name="cloud_topic" default="/airsim/point_cloud"/>
+
+    <arg name="cx" default="320.0"/>
+    <arg name="cy" default="240.0"/>
+    <arg name="fx" default="320.0"/>
+    <arg name="fy" default="320.0"/>
+
+    <arg name="flight_type" default="2"/>
+    <arg name="point_num" default="1"/>
+    <arg name="point0_x" default="19.99"/>
+    <arg name="point0_y" default="0.0"/>
+    <arg name="point0_z" default="1.0"/>
+    <arg name="point1_x" default="19.99"/>
+    <arg name="point1_y" default="0.0"/>
+    <arg name="point1_z" default="1.0"/>
+    <arg name="point2_x" default="-19.0"/>
+    <arg name="point2_y" default="0.0"/>
+    <arg name="point2_z" default="1.0"/>
+
+    <arg name="enable_traj_server" default="false"/>
+    <arg name="enable_waypoint_generator" default="false"/>
+    <arg name="enable_position_cmd_to_airsim" default="false"/>
+
+    <include file="$(find plan_manage)/launch/topo_algorithm.xml">
+        <arg name="map_size_x_" value="$(arg map_size_x)"/>
+        <arg name="map_size_y_" value="$(arg map_size_y)"/>
+        <arg name="map_size_z_" value="$(arg map_size_z)"/>
+        <arg name="odometry_topic" value="$(arg odom_topic)"/>
+        <arg name="sensor_pose_topic" value="$(arg sensor_pose_topic)"/>
+        <arg name="depth_topic" value="$(arg depth_topic)"/>
+        <arg name="cloud_topic" value="$(arg cloud_topic)"/>
+        <arg name="cx" value="$(arg cx)"/>
+        <arg name="cy" value="$(arg cy)"/>
+        <arg name="fx" value="$(arg fx)"/>
+        <arg name="fy" value="$(arg fy)"/>
+        <arg name="max_vel" value="$(arg max_vel)"/>
+        <arg name="max_acc" value="$(arg max_acc)"/>
+        <arg name="flight_type" value="$(arg flight_type)"/>
+        <arg name="point_num" value="$(arg point_num)"/>
+        <arg name="point0_x" value="$(arg point0_x)"/>
+        <arg name="point0_y" value="$(arg point0_y)"/>
+        <arg name="point0_z" value="$(arg point0_z)"/>
+        <arg name="point1_x" value="$(arg point1_x)"/>
+        <arg name="point1_y" value="$(arg point1_y)"/>
+        <arg name="point1_z" value="$(arg point1_z)"/>
+        <arg name="point2_x" value="$(arg point2_x)"/>
+        <arg name="point2_y" value="$(arg point2_y)"/>
+        <arg name="point2_z" value="$(arg point2_z)"/>
+    </include>
+
+    <!-- <group if="$(arg enable_traj_server)">
+        <node pkg="plan_manage" name="traj_server" type="traj_server" output="screen">
+            <remap from="/position_cmd" to="planning/pos_cmd"/>
+            <remap from="/odom_world" to="$(arg odom_topic)"/>
+            <param name="traj_server/time_forward" value="1.5" type="double"/>
+            <param name="traj_server/pub_traj_id" value="4" type="int"/>
+            <param name="traj_server/init_x" value="$(arg init_x)" type="double"/>
+            <param name="traj_server/init_y" value="$(arg init_y)" type="double"/>
+            <param name="traj_server/init_z" value="$(arg init_z)" type="double"/>
+            <param name="perception_utils/top_angle" value="0.56125" type="double"/>
+            <param name="perception_utils/left_angle" value="0.69222" type="double"/>
+            <param name="perception_utils/right_angle" value="0.68901" type="double"/>
+            <param name="perception_utils/max_dist" value="6.0" type="double"/>
+            <param name="perception_utils/vis_dist" value="1.0" type="double"/>
+        </node>
+    </group>
+
+    <group if="$(arg enable_waypoint_generator)">
+        <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
+            <remap from="~odom" to="$(arg odom_topic)"/>
+            <remap from="~goal" to="/move_base_simple/goal"/>
+            <remap from="~traj_start_trigger" to="/traj_start_trigger"/>
+            <param name="waypoint_type" value="point"/>
+        </node>
+    </group>
+
+    <group if="$(arg enable_position_cmd_to_airsim)">
+        <node pkg="active_mapping" name="position_cmd_to_airsim" type="position_cmd_to_airsim.py" output="screen">
+            <param name="cmd_topic" value="planning/pos_cmd"/>
+            <param name="airsim_host" value="127.0.0.1"/>
+            <param name="airsim_port" value="41451"/>
+            <param name="control_rate" value="30.0"/>
+            <param name="feedforward_dt" value="0.0333333333"/>
+            <param name="cmd_timeout" value="0.2"/>
+            <param name="max_vel" value="3.0"/>
+        </node>
+    </group> -->
+</launch>

@@ -50,6 +50,14 @@ struct Frontier {
   list<double> costs_;
 };
 
+struct SurfaceVoxel {
+  Eigen::Vector3i idx_;
+  Vector3d pos_;
+  Vector3d normal_;
+  int adr_;
+  int expose_score_;
+};
+
 class FrontierFinder {
 public:
   FrontierFinder(const shared_ptr<EDTEnvironment>& edt, ros::NodeHandle& nh);
@@ -61,6 +69,8 @@ public:
   void getFrontiers(vector<vector<Vector3d>>& clusters);
   void getDormantFrontiers(vector<vector<Vector3d>>& clusters);
   void getFrontierBoxes(vector<pair<Vector3d, Vector3d>>& boxes);
+  void getSurfaceVoxels(vector<Vector3d>& voxels);
+  void getSurfaceNormals(vector<Vector3d>& starts, vector<Vector3d>& ends, const double& scale);
   // Get viewpoint with highest coverage for each frontier
   void getTopViewpointsInfo(const Vector3d& cur_pos, vector<Vector3d>& points, vector<double>& yaws,
                             vector<Vector3d>& averages);
@@ -80,6 +90,8 @@ public:
   shared_ptr<PerceptionUtils> percep_utils_;
 
 private:
+  void extractSurfaceCandidates();
+  bool isExposedSurface(const Eigen::Vector3i& voxel, SurfaceVoxel& surface);
   void splitLargeFrontiers(list<Frontier>& frontiers);
   bool splitHorizontally(const Frontier& frontier, list<Frontier>& splits);
   void mergeFrontiers(Frontier& ftr1, const Frontier& ftr2);
@@ -112,6 +124,7 @@ private:
   // Data
   vector<char> frontier_flag_;
   list<Frontier> frontiers_, dormant_frontiers_, tmp_frontiers_;
+  vector<SurfaceVoxel> surface_voxels_;
   vector<int> removed_ids_;
   list<Frontier>::iterator first_new_ftr_;
   Frontier next_frontier_;
@@ -124,6 +137,9 @@ private:
   int down_sample_;
   double min_view_finish_fraction_, resolution_;
   int min_visib_num_, candidate_rnum_;
+  int surface_neighbor_type_, min_surface_expose_score_;
+  double surface_search_inflate_xy_, surface_search_inflate_z_;
+  bool treat_unknown_as_exposed_;
 
   // Utils
   shared_ptr<EDTEnvironment> edt_env_;
