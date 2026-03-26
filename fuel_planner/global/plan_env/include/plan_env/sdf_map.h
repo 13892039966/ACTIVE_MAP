@@ -54,6 +54,7 @@ public:
   double getDistance(const Eigen::Vector3i& id);
   double getDistWithGrad(const Eigen::Vector3d& pos, Eigen::Vector3d& grad);
   void updateESDF3d();
+  void carveFreeRegion(const Eigen::Vector3d& center, double radius_xy, double radius_z);
   void resetBuffer();
   void resetBuffer(const Eigen::Vector3d& min, const Eigen::Vector3d& max);
 

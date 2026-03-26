@@ -41,6 +41,14 @@ shared_ptr<PerceptionUtils> percep_utils_;
 // Info of replan
 bool receive_traj_ = false;
 double replan_time_;
+double replan_timeout_ = 0.0;
+double time_forward_ = 0.0;
+double cmd_max_acc_ = 2.0;
+double cmd_max_jerk_ = 4.0;
+double cmd_max_yaw_rate_ = 1.0;
+bool last_cmd_yaw_valid_ = false;
+double last_cmd_yaw_ = 0.0;
+ros::Time last_cmd_stamp_;
 
 // Executed traj, commanded and real ones
 vector<Eigen::Vector3d> traj_cmd_, traj_real_;
@@ -61,6 +69,32 @@ double calcPathLength(const vector<Eigen::Vector3d>& path) {
     len += (path[i + 1] - path[i]).norm();
   }
   return len;
+}
+
+double wrapAngle(double angle) {
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
+
+double unwrapTowards(double reference, double target) {
+  return reference + wrapAngle(target - reference);
+}
+
+void clampVectorNorm(Eigen::Vector3d& value, const double max_norm) {
+  if (max_norm <= 0.0) return;
+  const double norm = value.norm();
+  if (norm > max_norm && norm > 1e-6) value *= max_norm / norm;
+}
+
+void clampScalar(double& value, const double limit) {
+  if (limit <= 0.0) return;
+  value = std::max(-limit, std::min(limit, value));
+}
+
+double smoothStep01(double x) {
+  x = std::max(0.0, std::min(1.0, x));
+  return x * x * (3.0 - 2.0 * x);
 }
 
 void displayTrajWithColor(vector<Eigen::Vector3d> path, double resolution, Eigen::Vector4d color,
@@ -173,9 +207,8 @@ void drawCmd(const Eigen::Vector3d& pos, const Eigen::Vector3d& vec, const int& 
 
 void replanCallback(std_msgs::Empty msg) {
   // Informed of new replan, end the current traj after some time
-  const double time_out = 0.3;
   ros::Time time_now = ros::Time::now();
-  double t_stop = (time_now - start_time_).toSec() + time_out + replan_time_;
+  double t_stop = (time_now - start_time_).toSec() + replan_timeout_ + replan_time_;
   traj_duration_ = min(t_stop, traj_duration_);
 }
 
@@ -262,6 +295,7 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
     ROS_WARN("start flight");
     start_time = ros::Time::now();
   }
+
 }
 
 void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
@@ -329,6 +363,7 @@ void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
     ROS_WARN("start flight");
     start_time = ros::Time::now();
   }
+
 }
 
 void polyYawTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
@@ -396,6 +431,7 @@ void cmdCallback(const ros::TimerEvent& e) {
         yawdot = minco_yaw_traj_->getVel(yaw_t)[0];
       } else {
         yaw = atan2(vel.y(), vel.x());
+        yawdot = 0.0;
       }
     } else if (use_poly_traj_) {
       pos = poly_pos_traj_.evaluate(t_cur, 0);
@@ -459,6 +495,27 @@ void cmdCallback(const ros::TimerEvent& e) {
     yaw = atan2(yaw_dir[1], yaw_dir[0]);
   }
 
+  clampVectorNorm(acc, cmd_max_acc_);
+  clampVectorNorm(jer, cmd_max_jerk_);
+
+  if (!std::isfinite(yaw)) yaw = 0.0;
+  yaw = wrapAngle(yaw);
+  if (last_cmd_yaw_valid_) {
+    yaw = unwrapTowards(last_cmd_yaw_, yaw);
+    const double dt = std::max(1e-3, (time_now - last_cmd_stamp_).toSec());
+    const double max_delta = std::max(1e-3, cmd_max_yaw_rate_ * dt);
+    double yaw_delta = yaw - last_cmd_yaw_;
+    clampScalar(yaw_delta, max_delta);
+    yaw = last_cmd_yaw_ + yaw_delta;
+    yawdot = yaw_delta / dt;
+  }
+  if (!std::isfinite(yawdot)) yawdot = 0.0;
+  clampScalar(yawdot, cmd_max_yaw_rate_);
+
+  last_cmd_yaw_ = yaw;
+  last_cmd_stamp_ = time_now;
+  last_cmd_yaw_valid_ = true;
+
   cmd.header.stamp = time_now;
   cmd.trajectory_id = traj_id_;
   cmd.position.x = pos(0);
@@ -470,6 +527,9 @@ void cmdCallback(const ros::TimerEvent& e) {
   cmd.acceleration.x = acc(0);
   cmd.acceleration.y = acc(1);
   cmd.acceleration.z = acc(2);
+  cmd.jerk.x = jer(0);
+  cmd.jerk.y = jer(1);
+  cmd.jerk.z = jer(2);
   cmd.yaw = yaw;
   cmd.yaw_dot = yawdot;
   pos_cmd_pub.publish(cmd);
@@ -615,6 +675,14 @@ int main(int argc, char** argv) {
 
   nh.param("traj_server/pub_traj_id", pub_traj_id_, -1);
   nh.param("fsm/replan_time", replan_time_, 0.1);
+  nh.param("fsm/replan_timeout", replan_timeout_, 0.0);
+  nh.param("traj_server/time_forward", time_forward_, 0.0);
+  nh.param("manager/max_acc", cmd_max_acc_, 2.0);
+  nh.param("manager/max_jerk", cmd_max_jerk_, 4.0);
+  nh.param("manager/max_yawdot", cmd_max_yaw_rate_, -1.0);
+  if (cmd_max_yaw_rate_ <= 1e-3) {
+    nh.param("heading_planner/max_yaw_rate", cmd_max_yaw_rate_, 1.0);
+  }
   nh.param("loop_correction/isLoopCorrection", isLoopCorrection, false);
 
   Eigen::Vector3d init_pos;
@@ -623,6 +691,10 @@ int main(int argc, char** argv) {
   nh.param("traj_server/init_z", init_pos[2], 0.0);
 
   ROS_WARN("[Traj server]: init...");
+  ROS_WARN_STREAM("[Traj server]: time_forward configured as " << time_forward_
+                  << " s, but current tracking uses t_cur directly.");
+  ROS_WARN_STREAM("[Traj server]: command safety limits acc=" << cmd_max_acc_
+                  << " jerk=" << cmd_max_jerk_ << " yaw_rate=" << cmd_max_yaw_rate_);
   ros::Duration(1.0).sleep();
 
   // Control parameter
@@ -645,6 +717,9 @@ int main(int argc, char** argv) {
   cmd.acceleration.x = 0.0;
   cmd.acceleration.y = 0.0;
   cmd.acceleration.z = 0.0;
+  cmd.jerk.x = 0.0;
+  cmd.jerk.y = 0.0;
+  cmd.jerk.z = 0.0;
   cmd.yaw = 0.0;
   cmd.yaw_dot = 0.0;
 

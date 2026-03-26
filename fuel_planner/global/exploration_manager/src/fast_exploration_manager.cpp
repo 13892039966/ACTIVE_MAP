@@ -87,12 +87,11 @@ void FastExplorationManager::initialize(ros::NodeHandle& nh) {
 int FastExplorationManager::planExploreMotion(
     const Vector3d& pos, const Vector3d& vel, const Vector3d& acc, const Vector3d& yaw) {
   const ros::Time planning_start = ros::Time::now();
-  Vector3d next_pos;
-  double next_yaw;
-  int global_result = global_planner_->computeNextViewpoint(pos, vel, yaw, next_pos, next_yaw);
+  vector<PathSegmentWithYaw> path_segments;
+  int global_result = global_planner_->computeNextViewpoint(pos, vel, yaw, path_segments);
   if (global_result != SUCCEED) return global_result;
 
-  int local_result = local_planner_->planToViewpoint(pos, vel, acc, yaw, next_pos, next_yaw);
+  int local_result = local_planner_->planToViewpoint(pos, vel, acc, yaw, path_segments);
   if (local_result != SUCCEED) return local_result;
 
   double total = (ros::Time::now() - planning_start).toSec();

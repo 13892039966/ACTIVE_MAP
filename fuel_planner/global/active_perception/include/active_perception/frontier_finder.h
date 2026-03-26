@@ -92,6 +92,10 @@ private:
 
   int countVisibleCells(const Vector3d& pos, const double& yaw, const vector<Vector3d>& cluster);
   bool isNearUnknown(const Vector3d& pos);
+  bool isNearOtherFrontiers(const Vector3d& pos, const Frontier& self) const;
+  bool hasInflatedObstacleClearance(const Vector3d& pos) const;
+  bool hasSufficientViewpointClearance(const Vector3d& pos) const;
+  bool hasDenseFreeNeighborhood(const Vector3d& pos) const;
   vector<Eigen::Vector3i> sixNeighbors(const Eigen::Vector3i& voxel);
   vector<Eigen::Vector3i> tenNeighbors(const Eigen::Vector3i& voxel);
   vector<Eigen::Vector3i> allNeighbors(const Eigen::Vector3i& voxel);

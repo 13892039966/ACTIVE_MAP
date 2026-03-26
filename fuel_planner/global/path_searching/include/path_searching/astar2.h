@@ -45,6 +45,8 @@ public:
   void reset();
   int search(const Eigen::Vector3d& start_pt, const Eigen::Vector3d& end_pt);
   void setResolution(const double& res);
+  void setOptimisticUnknown(const bool enabled);
+  bool getOptimisticUnknown() const;
   static double pathLength(const vector<Eigen::Vector3d>& path);
 
   std::vector<Eigen::Vector3d> getPath();
@@ -77,6 +79,8 @@ private:
   int allocate_num_;
   double tie_breaker_;
   double resolution_, inv_resolution_;
+  bool optimistic_unknown_;
+  double unknown_block_radius_;
   Eigen::Vector3d map_size_3d_, origin_;
 };
 

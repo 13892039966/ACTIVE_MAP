@@ -15,6 +15,7 @@
 
 #include <active_perception/frontier_finder.h>
 #include <active_perception/heading_planner.h>
+#include <exploration_manager/expl_data.h>
 
 #include <plan_manage/plan_container.hpp>
 
@@ -41,7 +42,11 @@ public:
                        const Eigen::Vector3d& cur_acc, const double& time_lb);
   bool planExploreTraj(const vector<Eigen::Vector3d>& tour, const Eigen::Vector3d& cur_vel,
                        const Eigen::Vector3d& cur_acc, const double& time_lb = -1,
-                       const double target_yaw = std::numeric_limits<double>::quiet_NaN());
+                       const double target_yaw = std::numeric_limits<double>::quiet_NaN(),
+                       const Eigen::Vector3d& terminal_vel = Eigen::Vector3d::Zero(),
+                       const bool stop_at_goal = true);
+  bool planExploreTrajLong(const vector<PathSegmentWithYaw>& segments, const Eigen::Vector3d& cur_vel,
+                           const Eigen::Vector3d& cur_acc, const double& time_lb = -1);
   bool planGlobalTraj(const Eigen::Vector3d& start_pos);
   bool topoReplan(bool collide);
 
@@ -53,8 +58,14 @@ public:
   void setGlobalWaypoints(vector<Eigen::Vector3d>& waypoints);
   void exportTrajToPolyMsg(traj_utils::PolyTraj& pos_msg, traj_utils::PolyTraj& yaw_msg,
                            const ros::Time& start_time);
+  bool reuseActiveTrajFromNow(traj_utils::PolyTraj& pos_msg, traj_utils::PolyTraj& yaw_msg,
+                              const ros::Time& start_time, double min_time_left = 0.3);
+  const vector<double>& getExploreViewpointArrivalTimes() const {
+    return explore_long_viewpoint_arrival_times_;
+  }
 
   bool checkTrajCollision(double& distance);
+  bool checkTrajCollision(double& distance, double& collision_time);
   void calcNextYaw(const double& last_yaw, double& yaw);
   void angleLimite(double& angle);
   bool isPointSafeInExploreSpace(const Eigen::Vector3d& pt, bool allow_unknown = false) const;
@@ -82,18 +93,33 @@ private:
 
   bool solveMincoPositionTraj(const vector<Eigen::Vector3d>& tour, const Eigen::Vector3d& cur_vel,
                               const Eigen::Vector3d& cur_acc, const double& time_lb,
-                              const double target_yaw);
+                              const double target_yaw, const Eigen::Vector3d& terminal_vel,
+                              const bool stop_at_goal);
   bool solveMincoYawTraj(const Eigen::Vector3d& start_yaw, const double& end_yaw, bool lookfwd,
                          const double& relax_time);
   bool validateActiveTrajInExploreSpace(double sample_step = -1.0);
+  bool pushPointAwayFromObstacles(const Eigen::Vector3d& seed, Eigen::Vector3d& adjusted_pt,
+                                  double target_clearance, double max_shift = 0.8,
+                                  int max_iters = 6) const;
   bool setupExploreMinco(const vector<Eigen::Vector3d>& safe_tour, const Eigen::Vector3d& cur_vel,
-                         const Eigen::Vector3d& cur_acc, const double& time_lb);
+                         const Eigen::Vector3d& cur_acc, const double& time_lb,
+                         const Eigen::Vector3d& terminal_vel, const bool stop_at_goal);
   void computeExploreConstraintCostGrad(double& cost, Eigen::MatrixX3d& gdC,
                                         Eigen::VectorXd& gdT);
   void computeExploreYawCostGrad(const Eigen::VectorXd& T, double& cost, Eigen::VectorXd& gdT);
   void queryDistanceWithGrad(const Eigen::Vector3d& pos, double& dist, Eigen::Vector3d& grad) const;
   bool smoothedL1(const double& x, const double& mu, double& f, double& df) const;
   static double innerCallbackExplore(void* ptrObj, const Eigen::VectorXd& x, Eigen::VectorXd& grad);
+  bool setupExploreLongMinco(const vector<PathSegmentWithYaw>& segments,
+                             const Eigen::Vector3d& cur_vel, const Eigen::Vector3d& cur_acc,
+                             const double& time_lb);
+  void computeExploreLongConstraintCostGrad(double& cost, Eigen::MatrixX3d& gdC,
+                                            Eigen::VectorXd& gdT);
+  void computeExploreLongYawCostGrad(const Eigen::VectorXd& T, double& cost, Eigen::VectorXd& gdT);
+  void computeExploreLongArrivalTimes(const Eigen::VectorXd& T);
+  bool buildExploreLongYawTraj(const Eigen::Vector3d& start_yaw, Trajectory<5>& yaw_traj);
+  static double innerCallbackExploreLong(void* ptrObj, const Eigen::VectorXd& x,
+                                         Eigen::VectorXd& grad);
 
   void updateTrajInfo();
 
@@ -145,6 +171,27 @@ private:
   double explore_target_yaw_ = std::numeric_limits<double>::quiet_NaN();
   double explore_max_vel_sq_ = 0.0;
   double explore_max_acc_sq_ = 0.0;
+  Eigen::Vector3d explore_terminal_vel_ = Eigen::Vector3d::Zero();
+  bool explore_stop_at_goal_ = true;
+  Eigen::MatrixXd explore_long_select_waypt_;
+  Eigen::MatrixXd explore_long_select_viewpt_;
+  Eigen::Matrix3Xd explore_long_way_wps_;
+  Eigen::Matrix3Xd explore_long_view_wps_;
+  Eigen::Matrix3Xd explore_long_fused_wps_;
+  Eigen::Matrix3Xd explore_long_all_wps_;
+  Eigen::Matrix<double, 3, 4> explore_long_ini_state_;
+  Eigen::Matrix<double, 3, 4> explore_long_fin_state_;
+  Eigen::VectorXd explore_long_times_;
+  minco::MINCO_S4NU explore_long_minco_;
+  vector<bool> explore_long_opt_indi_;
+  vector<double> explore_long_target_yaws_;
+  vector<int> explore_long_viewpoint_piece_indices_;
+  vector<double> explore_long_viewpoint_arrival_times_;
+  vector<Eigen::Vector3d> explore_long_ref_path_points_;
+  vector<vector<Eigen::Vector3d>> explore_long_ref_path_segments_;
+  int explore_long_piece_num_ = 0;
+  int explore_long_waypt_count_ = 0;
+  double explore_long_time_lb_ = -1.0;
 
   static inline void forwardTLocal(const Eigen::VectorXd& tau, Eigen::VectorXd& T) {
     const int sizeTau = tau.size();

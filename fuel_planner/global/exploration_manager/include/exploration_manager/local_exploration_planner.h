@@ -14,6 +14,7 @@ class EDTEnvironment;
 class FastPlannerManager;
 class SDFMap;
 struct ExplorationData;
+struct PathSegmentWithYaw;
 
 class LocalExplorationPlanner {
 public:
@@ -26,12 +27,14 @@ public:
                   const double relax_time);
 
   int planToViewpoint(const Vector3d& pos, const Vector3d& vel, const Vector3d& acc,
-                      const Vector3d& yaw, const Vector3d& next_pos, const double next_yaw);
+                      const Vector3d& yaw, const vector<PathSegmentWithYaw>& path_segments);
 
 private:
-  bool planGeometricPathFrontend(const Vector3d& raw_start, const Vector3d& goal);
+  bool sanitizePathSegments(const Vector3d& raw_start, const vector<PathSegmentWithYaw>& raw_segments,
+                            vector<PathSegmentWithYaw>& safe_segments, vector<Vector3d>& stitched_path);
   int solveMincoBackend(const Vector3d& vel, const Vector3d& acc, const Vector3d& yaw,
-                        const Vector3d& next_pos, const double next_yaw);
+                        const vector<PathSegmentWithYaw>& safe_segments,
+                        const vector<Vector3d>& stitched_path);
   bool findSearchStart(const Vector3d& raw_start, Vector3d& search_start) const;
   void shortenPath(vector<Vector3d>& path) const;
 

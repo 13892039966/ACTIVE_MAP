@@ -41,7 +41,9 @@ private:
   shared_ptr<FSMParam> fp_;
   shared_ptr<FSMData> fd_;
   EXPL_STATE state_;
-
+  ros::Time last_replan_time_;
+  ros::Time active_traj_reuse_protect_until_;
+  bool startup_free_space_initialized_ = false;
   bool classic_;
 
   /* ROS utils */
@@ -51,7 +53,9 @@ private:
   ros::Publisher replan_pub_, new_pub_, poly_traj_pub_, poly_yaw_traj_pub_;
 
   /* helper functions */
-  int callExplorationPlanner();
+  int callExplorationPlanner(const ros::Time& traj_start_time);
+  bool publishRemainingActiveTraj();
+  void stopCurrentTraj();
   void transitState(EXPL_STATE new_state, string pos_call);
 
   /* ROS functions */

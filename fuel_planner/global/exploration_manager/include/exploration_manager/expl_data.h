@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include <traj_utils/PolyTraj.h>
+#include <plan_manage/plan_container.hpp>
 
 using std::vector;
 using Eigen::Vector3d;
@@ -13,6 +14,12 @@ using std::pair;
 using std::string;
 
 namespace fast_planner {
+struct PathSegmentWithYaw {
+  vector<Vector3d> path;
+  Vector3d viewpoint = Vector3d::Zero();
+  double yaw = 0.0;
+};
+
 struct FSMData {
   // FSM data
   bool trigger_, have_odom_, static_state_;
@@ -26,6 +33,8 @@ struct FSMData {
   vector<Eigen::Vector3d> start_poss;
   traj_utils::PolyTraj newest_traj_;
   traj_utils::PolyTraj newest_yaw_traj_;
+  LocalTrajData pending_traj_;
+  bool has_pending_traj_ = false;
 };
 
 struct FSMParam {
@@ -33,6 +42,14 @@ struct FSMParam {
   double replan_thresh2_;
   double replan_thresh3_;
   double replan_time_;  // second
+  double replan_time_after_traj_start_;
+  double replan_time_before_traj_end_;
+  double replan_min_interval_;
+  double cluster_replan_min_progress_;
+  double replan_timeout_;
+  double reuse_traj_safety_grace_;
+  double startup_free_radius_xy_;
+  double startup_free_radius_z_;
   bool show_viewpoints_;
   bool show_trajectory_;
   bool show_next_goal_;
@@ -58,6 +75,11 @@ struct ExplorationData {
 
   Vector3d next_goal_;
   vector<Vector3d> path_next_goal_;
+  vector<Vector3d> lookahead_goals_;
+  vector<double> lookahead_yaws_;
+  vector<Vector3d> path_lookahead_;
+  vector<PathSegmentWithYaw> lookahead_path_segments_;
+  vector<double> lookahead_arrival_times_;
 
   // viewpoint planning
   // vector<Vector4d> views_;

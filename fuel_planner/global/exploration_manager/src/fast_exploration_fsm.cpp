@@ -11,6 +11,52 @@
 using Eigen::Vector4d;
 
 namespace fast_planner {
+namespace {
+double polyTrajTotalDuration(const traj_utils::PolyTraj& traj) {
+  double total = 0.0;
+  for (double dt : traj.duration) total += dt;
+  return total;
+}
+}  // namespace
+
+bool FastExplorationFSM::publishRemainingActiveTraj() {
+  if (fd_->static_state_) return false;
+
+  const ros::Time now = ros::Time::now();
+  const double min_time_left = std::max(0.3, fp_->replan_thresh1_);
+  if (!planner_manager_->reuseActiveTrajFromNow(fd_->newest_traj_, fd_->newest_yaw_traj_, now,
+                                                min_time_left)) {
+    return false;
+  }
+
+  const double reused_duration = polyTrajTotalDuration(fd_->newest_traj_);
+  const double protect_dt =
+      std::max(0.35, std::min(fp_->reuse_traj_safety_grace_, std::max(0.0, reused_duration - 0.05)));
+  active_traj_reuse_protect_until_ = now + ros::Duration(protect_dt);
+  ROS_WARN_STREAM("Planning failed, publish remaining active trajectory. min_time_left="
+                  << min_time_left << " protect_dt=" << protect_dt);
+  return true;
+}
+
+void FastExplorationFSM::stopCurrentTraj() {
+  replan_pub_.publish(std_msgs::Empty());
+  ros::Time time_now = ros::Time::now();
+  auto* info = &planner_manager_->local_data_;
+  if (info->start_time_.toSec() <= 0.0 || info->duration_ <= 0.0) {
+    fd_->static_state_ = true;
+    return;
+  }
+
+  const double elapsed = std::max(0.0, (time_now - info->start_time_).toSec());
+  const double shortened =
+      std::min(info->duration_,
+               elapsed + std::max(0.0, fp_->replan_timeout_) + std::max(0.0, fp_->replan_time_));
+  info->duration_ = shortened;
+  if (info->duration_ <= elapsed + 1e-3) {
+    fd_->static_state_ = true;
+  }
+}
+
 void FastExplorationFSM::init(ros::NodeHandle& nh) {
   fp_.reset(new FSMParam);
   fd_.reset(new FSMData);
@@ -20,6 +66,16 @@ void FastExplorationFSM::init(ros::NodeHandle& nh) {
   nh.param("fsm/thresh_replan2", fp_->replan_thresh2_, -1.0);
   nh.param("fsm/thresh_replan3", fp_->replan_thresh3_, -1.0);
   nh.param("fsm/replan_time", fp_->replan_time_, -1.0);
+  nh.param("fsm/replan_time_after_traj_start", fp_->replan_time_after_traj_start_,
+           std::max(0.3, fp_->replan_time_));
+  nh.param("fsm/replan_time_before_traj_end", fp_->replan_time_before_traj_end_,
+           std::max(0.5, fp_->replan_thresh1_));
+  nh.param("fsm/replan_min_interval", fp_->replan_min_interval_, 0.8);
+  nh.param("fsm/cluster_replan_min_progress", fp_->cluster_replan_min_progress_, 0.35);
+  nh.param("fsm/replan_timeout", fp_->replan_timeout_, 0.0);
+  nh.param("fsm/reuse_traj_safety_grace", fp_->reuse_traj_safety_grace_, 1.2);
+  nh.param("fsm/startup_free_radius_xy", fp_->startup_free_radius_xy_, 1.0);
+  nh.param("fsm/startup_free_radius_z", fp_->startup_free_radius_z_, 1.0);
   nh.param("fsm/show_viewpoints", fp_->show_viewpoints_, false);
   nh.param("fsm/show_trajectory", fp_->show_trajectory_, false);
   nh.param("fsm/show_next_goal", fp_->show_next_goal_, false);
@@ -35,11 +91,14 @@ void FastExplorationFSM::init(ros::NodeHandle& nh) {
   fd_->state_str_ = { "INIT", "WAIT_TRIGGER", "PLAN_TRAJ", "PUB_TRAJ", "EXEC_TRAJ", "FINISH" };
   fd_->static_state_ = true;
   fd_->trigger_ = false;
+  last_replan_time_ = ros::Time(0);
+  active_traj_reuse_protect_until_ = ros::Time(0);
+  startup_free_space_initialized_ = false;
 
   /* Ros sub, pub and timer */
   exec_timer_ = nh.createTimer(ros::Duration(0.01), &FastExplorationFSM::FSMCallback, this);
   safety_timer_ = nh.createTimer(ros::Duration(0.05), &FastExplorationFSM::safetyCallback, this);
-  frontier_timer_ = nh.createTimer(ros::Duration(0.5), &FastExplorationFSM::frontierCallback, this);
+  frontier_timer_ = nh.createTimer(ros::Duration(0.2), &FastExplorationFSM::frontierCallback, this);
 
   trigger_sub_ =
       nh.subscribe("/waypoint_generator/waypoints", 1, &FastExplorationFSM::triggerCallback, this);
@@ -78,27 +137,35 @@ void FastExplorationFSM::FSMCallback(const ros::TimerEvent& e) {
     }
 
     case PLAN_TRAJ: {
+      const ros::Time plan_begin = ros::Time::now();
+      ros::Time traj_start_time = plan_begin;
+      fd_->has_pending_traj_ = false;
       if (fd_->static_state_) {
-        // Plan from static state (hover)
         fd_->start_pt_ = fd_->odom_pos_;
         fd_->start_vel_ = fd_->odom_vel_;
         fd_->start_acc_.setZero();
-
         fd_->start_yaw_(0) = fd_->odom_yaw_;
         fd_->start_yaw_(1) = fd_->start_yaw_(2) = 0.0;
       } else {
-        // Replan from non-static state, starting from 'replan_time' seconds later
-        LocalTrajData* info = &planner_manager_->local_data_;
-        double t_r = (ros::Time::now() - info->start_time_).toSec() + fp_->replan_time_;
-        if (info->use_minco_) {
+        auto* info = &planner_manager_->local_data_;
+        traj_start_time += ros::Duration(std::max(0.0, fp_->replan_time_));
+        double t_r = std::max(0.0, (traj_start_time - info->start_time_).toSec());
+        if (info->use_minco_ && info->minco_traj_.getPieceNum() > 0) {
           t_r = std::min(t_r, info->duration_);
           fd_->start_pt_ = info->minco_traj_.getPos(t_r);
           fd_->start_vel_ = info->minco_traj_.getVel(t_r);
           fd_->start_acc_ = info->minco_traj_.getAcc(t_r);
-          fd_->start_yaw_(0) = info->minco_yaw_traj_.getPos(t_r)[0];
-          fd_->start_yaw_(1) = info->minco_yaw_traj_.getVel(t_r)[0];
-          fd_->start_yaw_(2) = info->minco_yaw_traj_.getAcc(t_r)[0];
+          if (info->minco_yaw_traj_.getPieceNum() > 0) {
+            const double yaw_t = std::min(t_r, info->minco_yaw_traj_.getTotalDuration());
+            fd_->start_yaw_(0) = info->minco_yaw_traj_.getPos(yaw_t)[0];
+            fd_->start_yaw_(1) = info->minco_yaw_traj_.getVel(yaw_t)[0];
+            fd_->start_yaw_(2) = info->minco_yaw_traj_.getAcc(yaw_t)[0];
+          } else {
+            fd_->start_yaw_(0) = fd_->odom_yaw_;
+            fd_->start_yaw_(1) = fd_->start_yaw_(2) = 0.0;
+          }
         } else {
+          t_r = std::min(t_r, info->duration_);
           fd_->start_pt_ = info->position_traj_.evaluateDeBoorT(t_r);
           fd_->start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_r);
           fd_->start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_r);
@@ -107,10 +174,13 @@ void FastExplorationFSM::FSMCallback(const ros::TimerEvent& e) {
           fd_->start_yaw_(2) = info->yawdotdot_traj_.evaluateDeBoorT(t_r)[0];
         }
       }
-
-      // Inform traj_server the replanning
-      replan_pub_.publish(std_msgs::Empty());
-      int res = callExplorationPlanner();
+      int res = callExplorationPlanner(traj_start_time);
+      const double plan_runtime = (ros::Time::now() - plan_begin).toSec();
+      if (res == SUCCEED && !fd_->static_state_) {
+        ROS_INFO_STREAM("[explore fsm] planned switch_time_offset="
+                        << (traj_start_time - plan_begin).toSec()
+                        << " plan_runtime=" << plan_runtime);
+      }
       if (res == SUCCEED) {
         transitState(PUB_TRAJ, "FSM");
       } else if (res == NO_FRONTIER) {
@@ -118,9 +188,19 @@ void FastExplorationFSM::FSMCallback(const ros::TimerEvent& e) {
         fd_->static_state_ = true;
         clearVisMarker();
       } else if (res == FAIL) {
-        // Still in PLAN_TRAJ state, keep replanning
-        ROS_WARN("plan fail");
-        fd_->static_state_ = true;
+        auto* info = &planner_manager_->local_data_;
+        double time_left = 0.0;
+        if (info->start_time_.toSec() > 0.0 && info->duration_ > 0.0) {
+          time_left = info->duration_ - (ros::Time::now() - info->start_time_).toSec();
+        }
+        if (time_left > 0.05) {
+          fd_->static_state_ = false;
+          ROS_WARN_STREAM("plan fail, keep current trajectory while replanning. time_left="
+                          << time_left);
+        } else {
+          ROS_WARN("plan fail");
+          fd_->static_state_ = true;
+        }
       }
       break;
     }
@@ -128,6 +208,10 @@ void FastExplorationFSM::FSMCallback(const ros::TimerEvent& e) {
     case PUB_TRAJ: {
       double dt = (ros::Time::now() - fd_->newest_traj_.start_time).toSec();
       if (dt > 0) {
+        if (fd_->has_pending_traj_) {
+          planner_manager_->local_data_ = fd_->pending_traj_;
+          fd_->has_pending_traj_ = false;
+        }
         poly_traj_pub_.publish(fd_->newest_traj_);
         poly_yaw_traj_pub_.publish(fd_->newest_yaw_traj_);
         fd_->static_state_ = false;
@@ -141,7 +225,15 @@ void FastExplorationFSM::FSMCallback(const ros::TimerEvent& e) {
 
     case EXEC_TRAJ: {
       LocalTrajData* info = &planner_manager_->local_data_;
-      double t_cur = (ros::Time::now() - info->start_time_).toSec();
+      const ros::Time now = ros::Time::now();
+      double t_cur = (now - info->start_time_).toSec();
+      const double duration = std::max(1e-3, info->duration_);
+      const double progress = std::max(0.0, std::min(1.0, t_cur / duration));
+      const bool replan_interval_ok =
+          last_replan_time_.isZero() || (now - last_replan_time_).toSec() > fp_->replan_min_interval_;
+      const bool in_roll_window =
+          t_cur > fp_->replan_time_after_traj_start_ &&
+          info->duration_ - t_cur > fp_->replan_time_before_traj_end_;
 
       // Replan if traj is almost fully executed
       double time_to_end = info->duration_ - t_cur;
@@ -151,23 +243,31 @@ void FastExplorationFSM::FSMCallback(const ros::TimerEvent& e) {
         return;
       }
       // Replan if next frontier to be visited is covered
-      if (t_cur > fp_->replan_thresh2_ && expl_manager_->frontier_finder_->isFrontierCovered()) {
+      if (in_roll_window && replan_interval_ok && progress > fp_->cluster_replan_min_progress_ &&
+          t_cur > fp_->replan_thresh2_ &&
+          expl_manager_->frontier_finder_->isFrontierCovered()) {
+        last_replan_time_ = now;
         transitState(PLAN_TRAJ, "FSM");
-        ROS_WARN("Replan: cluster covered=====================================");
+        ROS_WARN_STREAM("Replan: cluster covered===================================== progress="
+                        << progress << " dt_since_last="
+                        << (last_replan_time_.isZero() ? -1.0 : (now - last_replan_time_).toSec()));
         return;
       }
       // Replan after some time
-      if (t_cur > fp_->replan_thresh3_ && !classic_) {
+      if (in_roll_window && replan_interval_ok && t_cur > fp_->replan_thresh3_ && !classic_) {
+        last_replan_time_ = now;
         transitState(PLAN_TRAJ, "FSM");
-        ROS_WARN("Replan: periodic call=======================================");
+        ROS_WARN("Replan: rolling lookahead===================================");
       }
       break;
     }
   }
 }
 
-int FastExplorationFSM::callExplorationPlanner() {
-  ros::Time time_r = ros::Time::now() + ros::Duration(fp_->replan_time_);
+int FastExplorationFSM::callExplorationPlanner(const ros::Time& traj_start_time) {
+  const LocalTrajData active_backup = planner_manager_->local_data_;
+  const bool had_active =
+      !fd_->static_state_ && active_backup.start_time_.toSec() > 0.0 && active_backup.duration_ > 0.0;
 
   int res = expl_manager_->planExploreMotion(fd_->start_pt_, fd_->start_vel_, fd_->start_acc_,
                                              fd_->start_yaw_);
@@ -180,10 +280,19 @@ int FastExplorationFSM::callExplorationPlanner() {
   // classic_);
 
   if (res == SUCCEED) {
-    auto info = &planner_manager_->local_data_;
-    info->start_time_ = (ros::Time::now() - time_r).toSec() > 0 ? ros::Time::now() : time_r;
-    planner_manager_->exportTrajToPolyMsg(fd_->newest_traj_, fd_->newest_yaw_traj_,
-                                          info->start_time_);
+    auto planned = planner_manager_->local_data_;
+    planned.start_time_ = traj_start_time;
+    fd_->pending_traj_ = planned;
+    fd_->has_pending_traj_ = true;
+
+    planner_manager_->local_data_ = planned;
+    planner_manager_->exportTrajToPolyMsg(fd_->newest_traj_, fd_->newest_yaw_traj_, traj_start_time);
+
+    if (had_active) {
+      planner_manager_->local_data_ = active_backup;
+    }
+  } else if (had_active) {
+    planner_manager_->local_data_ = active_backup;
   }
   return res;
 }
@@ -265,14 +374,33 @@ void FastExplorationFSM::visualize() {
 
   // Draw trajectory
   if (fp_->show_next_goal_) {
-    if (!ed_ptr->path_next_goal_.empty())
+    if (!ed_ptr->lookahead_goals_.empty()) {
+      visualization_->drawSpheres(ed_ptr->lookahead_goals_, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
+    } else if (!ed_ptr->path_next_goal_.empty()) {
       visualization_->drawSpheres({ ed_ptr->next_goal_ }, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
-    else
+    } else {
       visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
-    visualization_->drawLines(ed_ptr->path_next_goal_, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+    }
+
+    if (!ed_ptr->lookahead_path_segments_.empty()) {
+      for (int i = 0; i < static_cast<int>(ed_ptr->lookahead_path_segments_.size()); ++i) {
+        visualization_->drawLines(ed_ptr->lookahead_path_segments_[i].path, 0.05,
+                                  Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
+      }
+      for (int i = static_cast<int>(ed_ptr->lookahead_path_segments_.size()); i < 5; ++i) {
+        visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
+      }
+    } else {
+      visualization_->drawLines(ed_ptr->path_next_goal_, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+      for (int i = 1; i < 5; ++i) {
+        visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
+      }
+    }
   } else {
     visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
-    visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+    for (int i = 0; i < 5; ++i) {
+      visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
+    }
   }
   if (fp_->show_trajectory_) {
     if (info->use_minco_) {
@@ -304,13 +432,11 @@ void FastExplorationFSM::clearVisMarker() {
   for (int i = 0; i < 15; ++i)
     visualization_->drawSpheres({}, 0.1, Vector4d(0, 0, 0, 1), "n_points", i, 6);
   visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
-  visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+  for (int i = 0; i < 5; ++i)
+    visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
 }
 
 void FastExplorationFSM::frontierCallback(const ros::TimerEvent& e) {
-  static int delay = 0;
-  if (++delay < 5) return;
-
   if (state_ == WAIT_TRIGGER || state_ == FINISH) {
     auto ft = expl_manager_->frontier_finder_;
     auto ed = expl_manager_->ed_;
@@ -341,6 +467,10 @@ void FastExplorationFSM::frontierCallback(const ros::TimerEvent& e) {
     ed->averages_.clear();
     ed->views_.clear();
     ed->path_next_goal_.clear();
+    ed->lookahead_goals_.clear();
+    ed->lookahead_yaws_.clear();
+    ed->lookahead_path_segments_.clear();
+    ed->lookahead_arrival_times_.clear();
     ed->refined_points_.clear();
     ed->refined_views_.clear();
     ed->refined_views1_.clear();
@@ -383,9 +513,12 @@ void FastExplorationFSM::frontierCallback(const ros::TimerEvent& e) {
       else
         visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
       visualization_->drawLines(ed->path_next_goal_, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+      for (int i = 1; i < 5; ++i)
+        visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
     } else {
       visualization_->drawSpheres({}, 0.3, Vector4d(0, 1, 1, 1), "next_goal", 0, 6);
-      visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", 1, 6);
+      for (int i = 0; i < 5; ++i)
+        visualization_->drawLines({}, 0.05, Vector4d(0, 1, 1, 1), "next_goal", i + 1, 6);
     }
   }
 
@@ -419,12 +552,20 @@ void FastExplorationFSM::triggerCallback(const nav_msgs::PathConstPtr& msg) {
 }
 
 void FastExplorationFSM::safetyCallback(const ros::TimerEvent& e) {
-  if (state_ == EXPL_STATE::EXEC_TRAJ) {
+  if (state_ == EXPL_STATE::EXEC_TRAJ || state_ == EXPL_STATE::PUB_TRAJ) {
+    if (!active_traj_reuse_protect_until_.isZero() &&
+        ros::Time::now() < active_traj_reuse_protect_until_) {
+      return;
+    }
     // Check safety and trigger replan if necessary
-    double dist;
-    bool safe = planner_manager_->checkTrajCollision(dist);
+    double dist, collision_time;
+    bool safe = planner_manager_->checkTrajCollision(dist, collision_time);
     if (!safe) {
       ROS_WARN("Replan: collision detected==================================");
+      if (collision_time < fp_->replan_time_ + 0.2) {
+        stopCurrentTraj();
+      }
+      fd_->has_pending_traj_ = false;
       transitState(PLAN_TRAJ, "safetyCallback");
     }
   }
@@ -446,6 +587,17 @@ void FastExplorationFSM::odometryCallback(const nav_msgs::OdometryConstPtr& msg)
 
   Eigen::Vector3d rot_x = fd_->odom_orient_.toRotationMatrix().block<3, 1>(0, 0);
   fd_->odom_yaw_ = atan2(rot_x(1), rot_x(0));
+
+  if (!startup_free_space_initialized_ && expl_manager_ &&
+      fp_->startup_free_radius_xy_ > 1e-3 && fp_->startup_free_radius_z_ > 1e-3) {
+    expl_manager_->planner_manager_->edt_environment_->sdf_map_->carveFreeRegion(
+        fd_->odom_pos_, fp_->startup_free_radius_xy_, fp_->startup_free_radius_z_);
+    startup_free_space_initialized_ = true;
+    ROS_WARN_STREAM("[FSM] carved startup free region around odom at "
+                    << fd_->odom_pos_.transpose() << " with radius_xy="
+                    << fp_->startup_free_radius_xy_ << " radius_z="
+                    << fp_->startup_free_radius_z_);
+  }
 
   fd_->have_odom_ = true;
 }

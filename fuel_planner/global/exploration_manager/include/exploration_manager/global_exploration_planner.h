@@ -14,6 +14,7 @@ class FrontierFinder;
 class FastPlannerManager;
 struct ExplorationData;
 struct ExplorationParam;
+struct PathSegmentWithYaw;
 
 class GlobalExplorationPlanner {
 public:
@@ -25,7 +26,7 @@ public:
                   const shared_ptr<ExplorationParam>& exploration_param);
 
   int computeNextViewpoint(const Vector3d& pos, const Vector3d& vel, const Vector3d& yaw,
-                           Vector3d& next_pos, double& next_yaw);
+                           vector<PathSegmentWithYaw>& path_segments);
 
 private:
   void findGlobalTour(const Vector3d& cur_pos, const Vector3d& cur_vel, const Vector3d cur_yaw,

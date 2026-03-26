@@ -33,12 +33,12 @@
   <arg name="frontier_cluster_min" default="30"/>
   <arg name="frontier_down_sample" default="2"/>
   <arg name="frontier_min_visib_num" default="8"/>
-  <arg name="frontier_min_candidate_dist" default="0.4"/>
-  <arg name="frontier_min_candidate_clearance" default="0.1"/>
+  <arg name="frontier_min_candidate_dist" default="1.5"/>
+  <arg name="frontier_min_candidate_clearance" default="0.6"/>
   <arg name="frontier_candidate_dphi_deg" default="10.0"/>
   <arg name="frontier_candidate_rnum" default="5"/>
-  <arg name="frontier_candidate_rmin" default="0.8"/>
-  <arg name="frontier_candidate_rmax" default="2.2"/>
+  <arg name="frontier_candidate_rmin" default="1.8"/>
+  <arg name="frontier_candidate_rmax" default="3.2"/>
   <arg name="perception_max_dist" default="12.0"/>
   <arg name="show_viewpoints" default="false"/>
   <arg name="show_trajectory" default="false"/>
@@ -56,8 +56,8 @@
     <param name="sdf_map/map_size_y"   value="$(arg map_size_y_)" /> 
     <param name="sdf_map/map_size_z"   value="$(arg map_size_z_)" /> 
     <!-- <param name="sdf_map/obstacles_inflation"     value="0.099" />  -->
-    <param name="sdf_map/obstacles_inflation"     value="0.45" />
-    <param name="sdf_map/local_bound_inflate"    value="0.6"/>
+    <param name="sdf_map/obstacles_inflation"     value="0.2" />
+    <param name="sdf_map/local_bound_inflate"    value="0.8"/>
     <param name="sdf_map/local_map_margin" value="50"/>
     <param name="sdf_map/ground_height"        value="$(arg sdf_ground_height)"/>
     <param name="sdf_map/default_dist"        value="0.0"/>
@@ -67,7 +67,7 @@
     <param name="sdf_map/p_min"  value="0.12"/>
     <param name="sdf_map/p_max"  value="0.90"/>
     <param name="sdf_map/p_occ"  value="0.80"/>
-    <param name="sdf_map/min_ray_length" value="0.5"/>
+    <param name="sdf_map/min_ray_length" value="0.2"/>
     <param name="sdf_map/max_ray_length" value="$(arg sdf_max_ray_length)"/>
     <param name="sdf_map/virtual_ceil_height"   value="$(arg sdf_virtual_ceil_height)"/>
     <param name="sdf_map/optimistic" value="false" type="bool"/>
@@ -105,6 +105,7 @@
     <!-- <param name="fsm/thresh_replan2" value="100.0" type="double"/> -->
     <!-- <param name="fsm/thresh_replan3" value="0.1" type="double"/> -->
     <param name="fsm/replan_time" value="0.200" type="double"/>
+    <param name="fsm/replan_timeout" value="0.0" type="double"/>
     <param name="fsm/show_viewpoints" value="$(arg show_viewpoints)" type="bool"/>
     <param name="fsm/show_trajectory" value="$(arg show_trajectory)" type="bool"/>
     <param name="fsm/show_next_goal" value="$(arg show_next_goal)" type="bool"/>
@@ -113,7 +114,7 @@
 
     <param name="exploration/refine_local" value="true" type="bool"/>
     <param name="exploration/refined_num" value="7" type="int"/>
-    <param name="exploration/refined_radius" value="5.0" type="double"/>
+    <param name="exploration/refined_radius" value="4.0" type="double"/>
     <param name="exploration/max_decay" value="0.8" type="double"/>
     <param name="exploration/top_view_num" value="15" type="int"/>
     <param name="exploration/vm" value="$(eval 1.0 * arg('max_vel'))" type="double"/>
@@ -157,12 +158,16 @@
     <!-- <param name="manager/max_vel" value="$(arg max_vel)" type="double"/> -->
     <param name="manager/max_vel" value="$(arg max_vel)" type="double"/>
     <param name="manager/max_acc" value="$(arg max_acc)" type="double"/>
-    <param name="manager/max_jerk" value="4" type="double"/>
+    <param name="manager/max_jerk" value="2.5" type="double"/>
     <param name="manager/dynamic_environment" value="0" type="int"/>
-    <param name="manager/local_segment_length" value="6.0" type="double"/>
-    <param name="manager/clearance_threshold" value="0.3" type="double"/>
-    <param name="manager/minco_safe_distance" value="0.4" type="double"/>
-    <param name="manager/control_points_distance" value="0.35" type="double"/>
+    <param name="manager/local_segment_length" value="3.5" type="double"/>
+    <param name="manager/clearance_threshold" value="0.45" type="double"/>
+    <param name="manager/minco_safe_distance" value="0.45" type="double"/>
+    <param name="manager/minco_rho_collision" value="500.0" type="double"/>
+    <param name="manager/minco_rho_path" value="3.0" type="double"/>
+    <param name="manager/minco_lbfgs_max_iter" value="400" type="int"/>
+    <param name="manager/explore_strict_horizon" value="1.5" type="double"/>
+    <param name="manager/control_points_distance" value="0.3" type="double"/>
     <param name="manager/use_geometric_path" value="true" type="bool"/>
     <param name="manager/use_kinodynamic_path" value="true" type="bool"/>
     <param name="manager/use_topo_path" value="true" type="bool"/>
@@ -171,25 +176,27 @@
     <param name="manager/min_time" value="true" type="bool"/>
 
   <!-- kinodynamic path searching -->
-    <param name="search/max_tau" value="0.8" type="double"/>
+    <param name="search/max_tau" value="0.6" type="double"/>
     <param name="search/init_max_tau" value="1.0" type="double"/>
     <param name="search/max_vel" value="$(arg max_vel)" type="double"/>
-    <param name="search/vel_margin" value="0.25" type="double"/>
+    <param name="search/vel_margin" value="0.0" type="double"/>
     <param name="search/max_acc" value="$(arg max_acc)" type="double"/>
     <param name="search/w_time" value="10.0" type="double"/>
-    <param name="search/horizon" value="5.0" type="double"/>
+    <param name="search/horizon" value="4.0" type="double"/>
     <param name="search/lambda_heu" value="10.0" type="double"/>
     <param name="search/resolution_astar" value="0.025" type="double"/>
     <param name="search/time_resolution" value="0.8" type="double"/>
-    <param name="search/margin" value="0.2" type="double"/>
+    <param name="search/margin" value="0.35" type="double"/>
     <param name="search/allocate_num" value="100000" type="int"/>
-    <param name="search/check_num" value="10" type="int"/>
-    <param name="search/optimistic" value="false" type="bool"/>
+    <param name="search/check_num" value="15" type="int"/>
+    <param name="search/optimistic" value="true" type="bool"/>
 
     <param name="astar/lambda_heu" value="10000.0" type="double"/>
     <param name="astar/resolution_astar" value="0.2" type="double"/>
     <param name="astar/allocate_num" value="1000000" type="int"/>
     <param name="astar/max_search_time" value="0.001" type="double"/>
+    <param name="astar/optimistic_unknown" value="true" type="bool"/>
+    <param name="astar/unknown_block_radius" value="1.2" type="double"/>
 
   <!-- trajectory optimization -->
     <param name="optimization/ld_smooth" value="20.0" type="double"/>
@@ -201,7 +208,7 @@
     <param name="optimization/ld_waypt" value="0.3" type="double"/>
     <param name="optimization/ld_view" value="0.0" type="double"/>
     <param name="optimization/ld_time" value="1.0" type="double"/>
-    <param name="optimization/dist0" value="0.7" type="double"/>
+    <param name="optimization/dist0" value="0.9" type="double"/>
     <param name="optimization/max_vel" value="$(arg max_vel)" type="double"/>
     <param name="optimization/max_acc" value="$(arg max_acc)" type="double"/>
     <param name="optimization/algorithm1" value="15" type="int"/>

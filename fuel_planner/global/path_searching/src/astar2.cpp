@@ -19,6 +19,8 @@ void Astar::init(ros::NodeHandle& nh, const EDTEnvironment::Ptr& env) {
   nh.param("astar/lambda_heu", lambda_heu_, -1.0);
   nh.param("astar/max_search_time", max_search_time_, -1.0);
   nh.param("astar/allocate_num", allocate_num_, -1);
+  nh.param("astar/optimistic_unknown", optimistic_unknown_, false);
+  nh.param("astar/unknown_block_radius", unknown_block_radius_, 1.2);
 
   tie_breaker_ = 1.0 + 1.0 / 1000;
 
@@ -44,6 +46,14 @@ void Astar::setResolution(const double& res) {
   this->inv_resolution_ = 1.0 / resolution_;
 }
 
+void Astar::setOptimisticUnknown(const bool enabled) {
+  optimistic_unknown_ = enabled;
+}
+
+bool Astar::getOptimisticUnknown() const {
+  return optimistic_unknown_;
+}
+
 int Astar::search(const Eigen::Vector3d& start_pt, const Eigen::Vector3d& end_pt) {
   NodePtr cur_node = path_node_pool_[0];
   cur_node->parent = NULL;
@@ -60,6 +70,13 @@ int Astar::search(const Eigen::Vector3d& start_pt, const Eigen::Vector3d& end_pt
   use_node_num_ += 1;
 
   const auto t1 = ros::Time::now();
+  const double unknown_block_radius_sq =
+      std::max(0.0, unknown_block_radius_) * std::max(0.0, unknown_block_radius_);
+  auto unknownBlocked = [&](const Eigen::Vector3d& pos) {
+    if (edt_env_->sdf_map_->getOccupancy(pos) != SDFMap::UNKNOWN) return false;
+    if (!optimistic_unknown_) return true;
+    return (pos - start_pt).squaredNorm() <= unknown_block_radius_sq;
+  };
 
   /* ---------- search loop ---------- */
   while (!open_set_.empty()) {
@@ -95,8 +112,7 @@ int Astar::search(const Eigen::Vector3d& start_pt, const Eigen::Vector3d& end_pt
           nbr_pos = cur_pos + step;
           // Check safety
           if (!edt_env_->sdf_map_->isInBox(nbr_pos)) continue;
-          if (edt_env_->sdf_map_->getInflateOccupancy(nbr_pos) == 1 ||
-              edt_env_->sdf_map_->getOccupancy(nbr_pos) == SDFMap::UNKNOWN)
+          if (edt_env_->sdf_map_->getInflateOccupancy(nbr_pos) == 1 || unknownBlocked(nbr_pos))
             continue;
 
           bool safe = true;
@@ -105,8 +121,7 @@ int Astar::search(const Eigen::Vector3d& start_pt, const Eigen::Vector3d& end_pt
           dir.normalize();
           for (double l = 0.1; l < len; l += 0.1) {
             Vector3d ckpt = cur_pos + l * dir;
-            if (edt_env_->sdf_map_->getInflateOccupancy(ckpt) == 1 ||
-                edt_env_->sdf_map_->getOccupancy(ckpt) == SDFMap::UNKNOWN) {
+            if (edt_env_->sdf_map_->getInflateOccupancy(ckpt) == 1 || unknownBlocked(ckpt)) {
               safe = false;
               break;
             }

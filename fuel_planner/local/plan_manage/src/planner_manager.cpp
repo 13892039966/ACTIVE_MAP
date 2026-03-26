@@ -14,6 +14,21 @@
 
 namespace fast_planner {
 namespace {
+struct MincoTrajStats {
+  double max_vel = 0.0;
+  double max_acc = 0.0;
+  double max_jerk = 0.0;
+  double min_obs_dist = std::numeric_limits<double>::infinity();
+  double min_obs_t = 0.0;
+};
+
+struct ExploreAcceptanceLimits {
+  double vel = std::numeric_limits<double>::infinity();
+  double acc = std::numeric_limits<double>::infinity();
+  double jerk = std::numeric_limits<double>::infinity();
+  double reject_safe_margin = 0.0;
+};
+
 double defaultExploreStep(const SDFMap::Ptr& sdf_map) {
   return sdf_map ? std::max(0.05, std::min(0.2, 0.5 * sdf_map->getResolution())) : 0.1;
 }
@@ -47,6 +62,118 @@ bool sampleCurrentYawState(const LocalTrajData& local_data, Eigen::Vector3d& yaw
   return true;
 }
 
+bool lbfgsReturnedUsableSolution(const int result) {
+  return result >= 0;
+}
+
+MincoTrajStats evaluateMincoTrajStats(const Trajectory<7>& traj,
+                                      fast_planner::FastPlannerManager* manager,
+                                      const double sample_dt) {
+  MincoTrajStats stats;
+  if (manager == nullptr || traj.getPieceNum() <= 0) return stats;
+
+  const double duration = traj.getTotalDuration();
+  const double dt = std::max(0.01, sample_dt);
+  for (double t = 0.0; t <= duration + 1e-6; t += dt) {
+    const double tc = std::min(duration, t);
+    const Eigen::Vector3d pos = traj.getPos(tc);
+    stats.max_vel = std::max(stats.max_vel, traj.getVel(tc).norm());
+    stats.max_acc = std::max(stats.max_acc, traj.getAcc(tc).norm());
+    stats.max_jerk = std::max(stats.max_jerk, traj.getJer(tc).norm());
+
+    double dist = 0.0;
+    Eigen::Vector3d grad = Eigen::Vector3d::Zero();
+    if (manager->edt_environment_) {
+      manager->edt_environment_->evaluateEDTWithGrad(pos, -1.0, dist, grad);
+    }
+    if (!std::isfinite(dist)) dist = 0.0;
+    if (dist < stats.min_obs_dist) {
+      stats.min_obs_dist = dist;
+      stats.min_obs_t = tc;
+    }
+  }
+
+  return stats;
+}
+
+ExploreAcceptanceLimits getExploreAcceptanceLimits(const fast_planner::PlanParameters& pp) {
+  ExploreAcceptanceLimits limits;
+  const double soft_safe_margin = std::max(0.05, 0.5 * pp.minco_safe_distance_);
+  limits.reject_safe_margin =
+      std::max(soft_safe_margin, std::max(0.12, 0.35 * pp.minco_safe_distance_));
+  limits.vel =
+      (pp.accept_vel_ > 0.0 ? pp.accept_vel_ : std::max(0.2, pp.max_vel_ * 1.05));
+  limits.acc =
+      (pp.accept_acc_ > 0.0 ? pp.accept_acc_ : std::max(0.2, pp.max_acc_ * 1.05));
+  limits.jerk =
+      (pp.max_jerk_ > 0.0 ? std::max(0.2, pp.max_jerk_ * 1.1) : std::numeric_limits<double>::infinity());
+  return limits;
+}
+
+double computeExploreTimeStretch(const MincoTrajStats& stats,
+                                 const fast_planner::PlanParameters& pp) {
+  const ExploreAcceptanceLimits limits = getExploreAcceptanceLimits(pp);
+  double stretch = 1.0;
+  if (limits.vel > 1e-6 && std::isfinite(limits.vel) && stats.max_vel > limits.vel) {
+    stretch = std::max(stretch, stats.max_vel / limits.vel);
+  }
+  if (limits.acc > 1e-6 && std::isfinite(limits.acc) && stats.max_acc > limits.acc) {
+    stretch = std::max(stretch, std::sqrt(stats.max_acc / limits.acc));
+  }
+  if (limits.jerk > 1e-6 && std::isfinite(limits.jerk) && stats.max_jerk > limits.jerk) {
+    stretch = std::max(stretch, std::cbrt(stats.max_jerk / limits.jerk));
+  }
+  if (stretch <= 1.02) return 1.0;
+  return std::min(3.0, stretch * 1.05);
+}
+
+double evaluateExploreProjectionScore(const SDFMap::Ptr& sdf_map,
+                                      const EDTEnvironment::Ptr& edt_environment,
+                                      const Eigen::Vector3d& candidate,
+                                      const Eigen::Vector3d& reference,
+                                      double target_clearance) {
+  double obs_dist = 0.0;
+  Eigen::Vector3d grad = Eigen::Vector3d::Zero();
+  if (edt_environment) {
+    edt_environment->evaluateEDTWithGrad(candidate, -1.0, obs_dist, grad);
+  }
+  if (!std::isfinite(obs_dist)) obs_dist = 0.0;
+
+  const double clearance_term =
+      std::min(obs_dist, target_clearance) / std::max(1e-3, target_clearance);
+  const double extra_clearance_bonus =
+      obs_dist > target_clearance
+          ? std::min(1.0, (obs_dist - target_clearance) / std::max(0.1, target_clearance))
+          : 0.0;
+  const double distance_penalty =
+      (candidate - reference).norm() / std::max(0.2, target_clearance);
+
+  (void)sdf_map;
+  return 3.0 * clearance_term + 0.5 * extra_clearance_bonus - 0.35 * distance_penalty;
+}
+
+bool sampleCurrentMincoState(const LocalTrajData& local_data, Eigen::Vector3d& pos,
+                             Eigen::Vector3d& vel, Eigen::Vector3d& acc,
+                             Eigen::Vector3d& jerk) {
+  if (local_data.minco_traj_.getPieceNum() <= 0 || local_data.start_time_.toSec() <= 0.0) {
+    return false;
+  }
+
+  double query_time = (ros::Time::now() - local_data.start_time_).toSec();
+  if (!std::isfinite(query_time)) query_time = 0.0;
+  query_time = std::max(0.0, query_time);
+
+  const double total_duration = local_data.minco_traj_.getTotalDuration();
+  if (total_duration <= 0.0) return false;
+
+  query_time = std::min(query_time, total_duration);
+  pos = local_data.minco_traj_.getPos(query_time);
+  vel = local_data.minco_traj_.getVel(query_time);
+  acc = local_data.minco_traj_.getAcc(query_time);
+  jerk = local_data.minco_traj_.getJer(query_time);
+  return true;
+}
+
 double inferYawFromPath(const vector<Eigen::Vector3d>& path) {
   for (size_t i = 1; i < path.size(); ++i) {
     const Eigen::Vector3d diff = path[i] - path[i - 1];
@@ -55,6 +182,34 @@ double inferYawFromPath(const vector<Eigen::Vector3d>& path) {
     }
   }
   return 0.0;
+}
+
+Eigen::Vector3d computeConstrainedTerminalVelocity(const vector<Eigen::Vector3d>& path,
+                                                   const Eigen::Vector3d& requested_vel,
+                                                   const fast_planner::PlanParameters& pp) {
+  if (path.size() < 2) return Eigen::Vector3d::Zero();
+
+  Eigen::Vector3d dir = Eigen::Vector3d::Zero();
+  double last_seg_len = 0.0;
+  for (int i = static_cast<int>(path.size()) - 1; i > 0; --i) {
+    const Eigen::Vector3d diff = path[i] - path[i - 1];
+    if (diff.norm() > 1e-3) {
+      dir = diff.normalized();
+      last_seg_len = diff.norm();
+      break;
+    }
+  }
+
+  if (dir.squaredNorm() < 1e-6) return Eigen::Vector3d::Zero();
+
+  double speed = requested_vel.dot(dir);
+  if (!std::isfinite(speed) || speed <= 0.05) return Eigen::Vector3d::Zero();
+
+  const double vel_cap = std::max(0.2, pp.max_vel_ * 0.8);
+  const double acc_cap =
+      std::sqrt(std::max(0.0, 2.0 * std::max(0.1, pp.max_acc_) * std::max(0.2, last_seg_len)));
+  speed = std::min(speed, std::min(vel_cap, acc_cap));
+  return dir * speed;
 }
 
 bool buildCoupledMincoYawTraj(const Eigen::VectorXd& raw_times, const Eigen::Vector3d& start_yaw,
@@ -100,6 +255,15 @@ void subdividePath(vector<Eigen::Vector3d>& path) {
     dense_path.push_back(path[i]);
   }
   path.swap(dense_path);
+}
+
+void subdividePathSegments(std::vector<fast_planner::PathSegmentWithYaw>& segments) {
+  for (auto& segment : segments) {
+    subdividePath(segment.path);
+    if (segment.path.empty() || (segment.path.back() - segment.viewpoint).norm() > 1e-3) {
+      segment.path.push_back(segment.viewpoint);
+    }
+  }
 }
 
 PolynomialTraj bsplineToPolynomialTraj(NonUniformBspline bspline) {
@@ -244,6 +408,48 @@ void mincoYawTrajToRosMsg(const Trajectory<5>& traj, const int traj_id, const ro
     }
   }
 }
+
+template <int D>
+Piece<D> shiftPiece(const Piece<D>& piece, double offset) {
+  typedef typename Piece<D>::CoefficientMat CoefficientMat;
+  const double clamped_offset = std::max(0.0, std::min(offset, piece.getDuration()));
+  Eigen::Matrix<double, 3, D + 1> asc;
+  for (int power = 0; power <= D; ++power) {
+    asc.col(power) = piece.getCoeffMat().col(D - power);
+  }
+
+  Eigen::Matrix<double, 3, D + 1> shifted_asc;
+  shifted_asc.setZero();
+  for (int new_power = 0; new_power <= D; ++new_power) {
+    for (int old_power = new_power; old_power <= D; ++old_power) {
+      shifted_asc.col(new_power) +=
+          asc.col(old_power) * (std::tgamma(old_power + 1) /
+                                (std::tgamma(new_power + 1) * std::tgamma(old_power - new_power + 1))) *
+          std::pow(clamped_offset, old_power - new_power);
+    }
+  }
+
+  CoefficientMat shifted;
+  for (int power = 0; power <= D; ++power) {
+    shifted.col(D - power) = shifted_asc.col(power);
+  }
+  return Piece<D>(std::max(1e-3, piece.getDuration() - clamped_offset), shifted);
+}
+
+template <int D>
+Trajectory<D> sliceTrajectoryFromTime(const Trajectory<D>& traj, double t_from) {
+  Trajectory<D> sliced;
+  if (traj.getPieceNum() <= 0) return sliced;
+
+  double t = std::max(0.0, std::min(t_from, traj.getTotalDuration()));
+  int piece_idx = traj.locatePieceIdx(t);
+  sliced.reserve(traj.getPieceNum() - piece_idx);
+  sliced.emplace_back(shiftPiece<D>(traj[piece_idx], t));
+  for (int i = piece_idx + 1; i < traj.getPieceNum(); ++i) {
+    sliced.emplace_back(traj[i]);
+  }
+  return sliced;
+}
 }  // namespace
 
 // SECTION interfaces for setup and query
@@ -282,6 +488,10 @@ void FastPlannerManager::initPlanModules(ros::NodeHandle& nh) {
   nh.param("manager/minco_lbfgs_delta", pp_.minco_lbfgs_delta_, pp_.minco_lbfgs_delta_);
   nh.param("manager/minco_lbfgs_max_iter", pp_.minco_lbfgs_max_iter_,
            pp_.minco_lbfgs_max_iter_);
+  nh.param("manager/explore_strict_horizon", pp_.explore_strict_horizon_,
+           pp_.explore_strict_horizon_);
+  ROS_WARN_STREAM("[planner_manager] manager/max_jerk=" << pp_.max_jerk_
+                  << " is currently diagnostic only for exploration MINCO.");
 
   bool use_geometric_path, use_kinodynamic_path, use_topo_path, use_optimization,
       use_active_perception;
@@ -356,6 +566,30 @@ void FastPlannerManager::exportTrajToPolyMsg(traj_utils::PolyTraj& pos_msg,
   polynomialTrajToRosMsg(yaw_poly, local_data_.traj_id_, start_time, yaw_msg);
 }
 
+bool FastPlannerManager::reuseActiveTrajFromNow(traj_utils::PolyTraj& pos_msg,
+                                                traj_utils::PolyTraj& yaw_msg,
+                                                const ros::Time& start_time,
+                                                double min_time_left) {
+  if (!local_data_.use_minco_ || local_data_.minco_traj_.getPieceNum() <= 0 ||
+      local_data_.minco_yaw_traj_.getPieceNum() <= 0 || local_data_.start_time_.toSec() <= 0.0) {
+    return false;
+  }
+
+  const double t_cur = std::max(0.0, (start_time - local_data_.start_time_).toSec());
+  const double time_left = local_data_.duration_ - t_cur;
+  if (time_left <= min_time_left) return false;
+
+  Trajectory<7> sliced_pos = sliceTrajectoryFromTime(local_data_.minco_traj_, t_cur);
+  Trajectory<5> sliced_yaw = sliceTrajectoryFromTime(local_data_.minco_yaw_traj_, t_cur);
+  if (sliced_pos.getPieceNum() <= 0 || sliced_yaw.getPieceNum() <= 0) return false;
+
+  local_data_.traj_id_ += 1;
+
+  mincoTrajToRosMsg(sliced_pos, local_data_.traj_id_, start_time, pos_msg);
+  mincoYawTrajToRosMsg(sliced_yaw, local_data_.traj_id_, start_time, yaw_msg);
+  return true;
+}
+
 bool FastPlannerManager::isPointSafeInExploreSpace(const Eigen::Vector3d& pt,
                                                    bool allow_unknown) const {
   if (!sdf_map_ || !sdf_map_->isInMap(pt) || !sdf_map_->isInBox(pt)) return false;
@@ -385,28 +619,73 @@ bool FastPlannerManager::projectToValidExplorePoint(const Eigen::Vector3d& raw_p
                                                     Eigen::Vector3d& projected_pt,
                                                     double max_radius) const {
   if (!sdf_map_) return false;
-  if (isPointSafeInExploreSpace(raw_pt, false)) {
-    projected_pt = raw_pt;
-    return true;
-  }
 
   Eigen::Vector3d box_min, box_max;
   sdf_map_->getBox(box_min, box_max);
   const double res = sdf_map_->getResolution();
   const double margin = std::max(1e-3, 0.5 * res);
+  const double target_clearance =
+      std::max({0.18, 0.9 * pp_.minco_safe_distance_, 2.0 * res});
   Eigen::Vector3d clamped = raw_pt;
   for (int i = 0; i < 3; ++i) {
     clamped[i] = std::max(box_min[i] + margin, std::min(box_max[i] - margin, clamped[i]));
   }
 
-  if (isPointSafeInExploreSpace(clamped, false)) {
-    projected_pt = clamped;
+  auto improveCandidate = [&](const Eigen::Vector3d& seed, double search_radius,
+                              Eigen::Vector3d& improved_pt) {
+    if (!isPointSafeInExploreSpace(seed, false)) return false;
+    Eigen::Vector3i center_idx;
+    sdf_map_->posToIndex(seed, center_idx);
+    const int max_step =
+        std::max(1, static_cast<int>(std::ceil(std::max(0.1, search_radius) / std::max(1e-3, res))));
+    improved_pt = seed;
+    double best_score =
+        evaluateExploreProjectionScore(sdf_map_, edt_environment_, seed, clamped, target_clearance);
+    double best_dist2 = (seed - clamped).squaredNorm();
+
+    for (int radius = 0; radius <= max_step; ++radius) {
+      for (int dx = -radius; dx <= radius; ++dx) {
+        for (int dy = -radius; dy <= radius; ++dy) {
+          for (int dz = -radius; dz <= radius; ++dz) {
+            if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) != radius) continue;
+            const Eigen::Vector3i idx = center_idx + Eigen::Vector3i(dx, dy, dz);
+            if (!sdf_map_->isInMap(idx) || !sdf_map_->isInBox(idx)) continue;
+            if (sdf_map_->getInflateOccupancy(idx) == 1 || sdf_map_->getOccupancy(idx) != SDFMap::FREE)
+              continue;
+
+            Eigen::Vector3d candidate;
+            sdf_map_->indexToPos(idx, candidate);
+            const double score = evaluateExploreProjectionScore(
+                sdf_map_, edt_environment_, candidate, clamped, target_clearance);
+            const double dist2 = (candidate - clamped).squaredNorm();
+            if (score > best_score + 1e-6 ||
+                (std::abs(score - best_score) <= 1e-6 && dist2 < best_dist2)) {
+              best_score = score;
+              best_dist2 = dist2;
+              improved_pt = candidate;
+            }
+          }
+        }
+      }
+    }
+
     return true;
+  };
+
+  if (isPointSafeInExploreSpace(raw_pt, false)) {
+    return improveCandidate(raw_pt, std::min(max_radius, std::max(0.6, 2.0 * target_clearance)),
+                            projected_pt);
+  }
+
+  if (isPointSafeInExploreSpace(clamped, false)) {
+    return improveCandidate(clamped, std::min(max_radius, std::max(0.6, 2.0 * target_clearance)),
+                            projected_pt);
   }
 
   Eigen::Vector3i center_idx;
   sdf_map_->posToIndex(clamped, center_idx);
   const int max_step = std::max(1, static_cast<int>(std::ceil(max_radius / std::max(1e-3, res))));
+  double best_score = -std::numeric_limits<double>::infinity();
   double best_dist2 = std::numeric_limits<double>::infinity();
   bool found = false;
 
@@ -415,15 +694,19 @@ bool FastPlannerManager::projectToValidExplorePoint(const Eigen::Vector3d& raw_p
       for (int dy = -radius; dy <= radius; ++dy) {
         for (int dz = -radius; dz <= radius; ++dz) {
           if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) != radius) continue;
-          Eigen::Vector3i idx = center_idx + Eigen::Vector3i(dx, dy, dz);
+          const Eigen::Vector3i idx = center_idx + Eigen::Vector3i(dx, dy, dz);
           if (!sdf_map_->isInMap(idx) || !sdf_map_->isInBox(idx)) continue;
           if (sdf_map_->getInflateOccupancy(idx) == 1 || sdf_map_->getOccupancy(idx) != SDFMap::FREE)
             continue;
 
           Eigen::Vector3d candidate;
           sdf_map_->indexToPos(idx, candidate);
+          const double score = evaluateExploreProjectionScore(
+              sdf_map_, edt_environment_, candidate, clamped, target_clearance);
           const double dist2 = (candidate - clamped).squaredNorm();
-          if (dist2 < best_dist2) {
+          if (!found || score > best_score + 1e-6 ||
+              (std::abs(score - best_score) <= 1e-6 && dist2 < best_dist2)) {
+            best_score = score;
             best_dist2 = dist2;
             projected_pt = candidate;
             found = true;
@@ -431,10 +714,14 @@ bool FastPlannerManager::projectToValidExplorePoint(const Eigen::Vector3d& raw_p
         }
       }
     }
-    if (found) return true;
   }
 
-  return false;
+  if (!found) return false;
+  Eigen::Vector3d improved_pt = projected_pt;
+  improveCandidate(projected_pt, std::min(max_radius, std::max(0.6, 2.0 * target_clearance)),
+                   improved_pt);
+  projected_pt = improved_pt;
+  return true;
 }
 
 bool FastPlannerManager::sanitizeExplorePath(const vector<Eigen::Vector3d>& raw_path,
@@ -444,6 +731,7 @@ bool FastPlannerManager::sanitizeExplorePath(const vector<Eigen::Vector3d>& raw_
   if (raw_path.empty()) return false;
 
   const double spacing = max_spacing > 0.0 ? max_spacing : std::max(pp_.ctrl_pt_dist * 0.5, defaultExploreStep(sdf_map_));
+  const double target_clearance = std::max(0.18, 0.9 * pp_.minco_safe_distance_);
   Eigen::Vector3d prev_pt;
   bool has_prev = false;
 
@@ -454,6 +742,7 @@ bool FastPlannerManager::sanitizeExplorePath(const vector<Eigen::Vector3d>& raw_
                        << raw_path[i].transpose());
       return false;
     }
+    pushPointAwayFromObstacles(safe_pt, safe_pt, target_clearance);
 
     if (!has_prev) {
       safe_path.push_back(safe_pt);
@@ -477,6 +766,11 @@ bool FastPlannerManager::sanitizeExplorePath(const vector<Eigen::Vector3d>& raw_
           return false;
         }
       }
+      Eigen::Vector3d inflated = projected;
+      if (pushPointAwayFromObstacles(projected, inflated, target_clearance) &&
+          isSegmentSafeInExploreSpace(safe_path.back(), inflated, spacing, false)) {
+        projected = inflated;
+      }
 
       if (!isSegmentSafeInExploreSpace(safe_path.back(), projected, spacing, false)) {
         ROS_ERROR_STREAM("Unsafe segment remains after path sanitization: "
@@ -493,10 +787,64 @@ bool FastPlannerManager::sanitizeExplorePath(const vector<Eigen::Vector3d>& raw_
   return safe_path.size() >= 2;
 }
 
+bool FastPlannerManager::pushPointAwayFromObstacles(const Eigen::Vector3d& seed,
+                                                    Eigen::Vector3d& adjusted_pt,
+                                                    double target_clearance,
+                                                    double max_shift,
+                                                    int max_iters) const {
+  adjusted_pt = seed;
+  if (!sdf_map_ || max_iters <= 0 || target_clearance <= 1e-3) return true;
+
+  const double res = sdf_map_->getResolution();
+  const double step_cap = std::max(0.08, 1.5 * res);
+  const double shift_cap = std::max(0.15, max_shift);
+  double accumulated_shift = 0.0;
+
+  for (int iter = 0; iter < max_iters; ++iter) {
+    double dist = 0.0;
+    Eigen::Vector3d grad = Eigen::Vector3d::Zero();
+    queryDistanceWithGrad(adjusted_pt, dist, grad);
+    if (!std::isfinite(dist) || dist >= target_clearance) {
+      return isPointSafeInExploreSpace(adjusted_pt, false);
+    }
+
+    const double grad_norm = grad.norm();
+    if (grad_norm < 1e-4) break;
+
+    const double remaining = std::max(0.0, target_clearance - dist);
+    double step = std::min(step_cap, std::max(0.04, 0.75 * remaining));
+    step = std::min(step, shift_cap - accumulated_shift);
+    if (step <= 1e-3) break;
+
+    Eigen::Vector3d candidate = adjusted_pt + grad / grad_norm * step;
+    Eigen::Vector3d projected = candidate;
+    if (!projectToValidExplorePoint(candidate, projected, std::max(0.4, 2.5 * res))) {
+      break;
+    }
+
+    double new_dist = 0.0;
+    Eigen::Vector3d new_grad = Eigen::Vector3d::Zero();
+    queryDistanceWithGrad(projected, new_dist, new_grad);
+    if (!std::isfinite(new_dist) || new_dist <= dist + 1e-4) break;
+
+    accumulated_shift += (projected - adjusted_pt).norm();
+    adjusted_pt = projected;
+    if (accumulated_shift >= shift_cap - 1e-3) break;
+  }
+
+  return isPointSafeInExploreSpace(adjusted_pt, false);
+}
+
 bool FastPlannerManager::checkTrajCollision(double& distance) {
+  double collision_time = 0.0;
+  return checkTrajCollision(distance, collision_time);
+}
+
+bool FastPlannerManager::checkTrajCollision(double& distance, double& collision_time) {
   double t_now = (ros::Time::now() - local_data_.start_time_).toSec();
   if (!std::isfinite(t_now)) t_now = 0.0;
   t_now = std::max(0.0, t_now);
+  collision_time = std::numeric_limits<double>::infinity();
   Eigen::Vector3d cur_pt;
   if (local_data_.use_minco_)
     cur_pt = local_data_.minco_traj_.getPos(std::min(t_now, local_data_.duration_));
@@ -517,6 +865,7 @@ bool FastPlannerManager::checkTrajCollision(double& distance) {
     queryDistanceWithGrad(fut_pt, dist, grad);
     if (dist < hard_collision_margin) {
       distance = radius;
+      collision_time = fut_t;
       std::cout << "collision at: " << fut_pt.transpose() << ", dist=" << dist << std::endl;
       return false;
     }
@@ -558,10 +907,23 @@ void FastPlannerManager::queryDistanceWithGrad(const Eigen::Vector3d& pos, doubl
   }
 }
 
+void logMincoTrajStats(const Trajectory<7>& traj, fast_planner::FastPlannerManager* manager,
+                       double sample_dt) {
+  if (manager == nullptr || traj.getPieceNum() <= 0) return;
+  const double duration = traj.getTotalDuration();
+  const MincoTrajStats stats = evaluateMincoTrajStats(traj, manager, sample_dt);
+  ROS_WARN_STREAM("[explore minco] duration=" << duration << " max_vel=" << stats.max_vel
+                  << " max_acc=" << stats.max_acc << " max_jerk=" << stats.max_jerk
+                  << " min_obs_dist=" << stats.min_obs_dist << " at t=" << stats.min_obs_t);
+}
+
+
 bool FastPlannerManager::setupExploreMinco(const vector<Eigen::Vector3d>& safe_tour,
                                            const Eigen::Vector3d& cur_vel,
                                            const Eigen::Vector3d& cur_acc,
-                                           const double& time_lb) {
+                                           const double& time_lb,
+                                           const Eigen::Vector3d& terminal_vel,
+                                           const bool stop_at_goal) {
   if (safe_tour.size() < 3) return false;
 
   explore_safe_tour_ = safe_tour;
@@ -570,6 +932,8 @@ bool FastPlannerManager::setupExploreMinco(const vector<Eigen::Vector3d>& safe_t
   explore_piece_num_ = static_cast<int>(safe_tour.size()) - 1;
   explore_inner_count_ = explore_piece_num_ - 1;
   explore_time_lb_ = time_lb;
+  explore_stop_at_goal_ = stop_at_goal;
+  explore_terminal_vel_ = computeConstrainedTerminalVelocity(safe_tour, terminal_vel, pp_);
 
   explore_ref_path_segments_.resize(explore_piece_num_);
   for (int i = 0; i < explore_piece_num_; ++i) {
@@ -582,9 +946,22 @@ bool FastPlannerManager::setupExploreMinco(const vector<Eigen::Vector3d>& safe_t
     seg_pts.push_back(p1);
   }
 
-  explore_ini_state_ << safe_tour.front(), cur_vel, cur_acc, Eigen::Vector3d::Zero();
-  explore_fin_state_ << safe_tour.back(), Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-      Eigen::Vector3d::Zero();
+  Eigen::Vector3d init_vel = cur_vel;
+  Eigen::Vector3d init_acc = cur_acc;
+  Eigen::Vector3d init_jerk = Eigen::Vector3d::Zero();
+  Eigen::Vector3d sampled_pos, sampled_vel, sampled_acc, sampled_jerk;
+  if (sampleCurrentMincoState(local_data_, sampled_pos, sampled_vel, sampled_acc, sampled_jerk) &&
+      (sampled_pos - safe_tour.front()).norm() < 1.0) {
+    init_vel = sampled_vel;
+    init_acc = sampled_acc;
+    init_jerk = sampled_jerk;
+  }
+  explore_ini_state_ << safe_tour.front(), init_vel, init_acc, init_jerk;
+  const Eigen::Vector3d fin_vel =
+      explore_stop_at_goal_ ? Eigen::Vector3d::Zero() : explore_terminal_vel_;
+  explore_fin_state_ << safe_tour.back(), fin_vel, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero();
+  ROS_INFO_STREAM("[explore minco] terminal mode=" << (explore_stop_at_goal_ ? "stop" : "through")
+                  << " fin_vel=" << fin_vel.transpose());
 
   explore_ref_inner_wps_.resize(3, explore_inner_count_);
   for (int i = 0; i < explore_inner_count_; ++i) {
@@ -607,6 +984,138 @@ bool FastPlannerManager::setupExploreMinco(const vector<Eigen::Vector3d>& safe_t
   explore_max_acc_sq_ = pp_.max_acc_ * pp_.max_acc_;
   explore_minco_.setConditions(explore_ini_state_, explore_fin_state_, explore_piece_num_);
   explore_minco_.setParameters(explore_inner_wps_, explore_times_);
+  return true;
+}
+
+bool FastPlannerManager::setupExploreLongMinco(const vector<PathSegmentWithYaw>& segments,
+                                               const Eigen::Vector3d& cur_vel,
+                                               const Eigen::Vector3d& cur_acc,
+                                               const double& time_lb) {
+  if (segments.empty()) return false;
+
+  explore_long_ref_path_points_.clear();
+  explore_long_ref_path_segments_.clear();
+  explore_long_target_yaws_.clear();
+  explore_long_viewpoint_piece_indices_.clear();
+  explore_long_viewpoint_arrival_times_.clear();
+  explore_long_opt_indi_.clear();
+  explore_long_time_lb_ = time_lb;
+
+  int total_wps = 0;
+  for (size_t seg_idx = 0; seg_idx < segments.size(); ++seg_idx) {
+    const auto& segment = segments[seg_idx];
+    if (segment.path.size() > 2) total_wps += static_cast<int>(segment.path.size()) - 2;
+    if (seg_idx + 1 < segments.size()) total_wps += 1;
+  }
+
+  explore_long_all_wps_.resize(3, total_wps);
+  int wp_idx = 0;
+  int piece_idx = 0;
+  for (size_t seg_idx = 0; seg_idx < segments.size(); ++seg_idx) {
+    const auto& segment = segments[seg_idx];
+    vector<Eigen::Vector3d> seg_pts = segment.path;
+    if (seg_pts.empty() || (seg_pts.back() - segment.viewpoint).norm() > 1e-3) {
+      seg_pts.push_back(segment.viewpoint);
+    }
+    explore_long_ref_path_segments_.push_back(seg_pts);
+    explore_long_ref_path_points_.insert(explore_long_ref_path_points_.end(), seg_pts.begin(),
+                                         seg_pts.end());
+
+    for (size_t i = 1; i + 1 < segment.path.size(); ++i) {
+      explore_long_all_wps_.col(wp_idx) = segment.path[i];
+      explore_long_opt_indi_.push_back(true);
+      ++wp_idx;
+      ++piece_idx;
+    }
+
+    if (seg_idx + 1 < segments.size()) {
+      explore_long_all_wps_.col(wp_idx) = segment.viewpoint;
+      explore_long_opt_indi_.push_back(false);
+      ++wp_idx;
+      ++piece_idx;
+    }
+
+    double raw_yaw = segment.yaw;
+    if (!explore_long_target_yaws_.empty()) {
+      raw_yaw = unwrapTowards(explore_long_target_yaws_.back(), raw_yaw);
+    }
+    explore_long_target_yaws_.push_back(raw_yaw);
+    explore_long_viewpoint_piece_indices_.push_back(piece_idx);
+  }
+
+  explore_long_piece_num_ = total_wps + 1;
+  const int viewpt_count = total_wps - std::count(explore_long_opt_indi_.begin(),
+                                                  explore_long_opt_indi_.end(), true);
+  explore_long_waypt_count_ = std::count(explore_long_opt_indi_.begin(), explore_long_opt_indi_.end(), true);
+  explore_long_way_wps_.resize(3, explore_long_waypt_count_);
+  explore_long_view_wps_.resize(3, viewpt_count);
+  explore_long_select_waypt_.resize(total_wps, explore_long_waypt_count_);
+  explore_long_select_viewpt_.resize(total_wps, viewpt_count);
+  explore_long_select_waypt_.setZero();
+  explore_long_select_viewpt_.setZero();
+
+  int way_idx = 0;
+  int view_idx = 0;
+  for (int i = 0; i < total_wps; ++i) {
+    if (explore_long_opt_indi_[i]) {
+      explore_long_select_waypt_(i, way_idx) = 1.0;
+      explore_long_way_wps_.col(way_idx) = explore_long_all_wps_.col(i);
+      ++way_idx;
+    } else {
+      explore_long_select_viewpt_(i, view_idx) = 1.0;
+      explore_long_view_wps_.col(view_idx) = explore_long_all_wps_.col(i);
+      ++view_idx;
+    }
+  }
+
+  const Eigen::Vector3d start_pos = !segments.front().path.empty() ? segments.front().path.front()
+                                                                   : segments.front().viewpoint;
+  Eigen::Vector3d init_vel = cur_vel;
+  Eigen::Vector3d init_acc = cur_acc;
+  Eigen::Vector3d init_jerk = Eigen::Vector3d::Zero();
+  Eigen::Vector3d sampled_pos, sampled_vel, sampled_acc, sampled_jerk;
+  if (sampleCurrentMincoState(local_data_, sampled_pos, sampled_vel, sampled_acc, sampled_jerk) &&
+      (sampled_pos - start_pos).norm() < 1.0) {
+    init_vel = sampled_vel;
+    init_acc = sampled_acc;
+    init_jerk = sampled_jerk;
+  }
+  explore_long_ini_state_ << start_pos, init_vel, init_acc, init_jerk;
+  explore_long_fin_state_ << segments.back().viewpoint, Eigen::Vector3d::Zero(),
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero();
+
+  explore_long_times_.resize(explore_long_piece_num_);
+  Eigen::Vector3d prev = explore_long_ini_state_.col(0);
+  if (total_wps > 0) {
+    for (int i = 0; i < total_wps; ++i) {
+      const Eigen::Vector3d cur = explore_long_all_wps_.col(i);
+      explore_long_times_(i) = std::max(0.12, (cur - prev).norm() / std::max(0.1, pp_.max_vel_ * 0.8));
+      prev = cur;
+    }
+  }
+  explore_long_times_(explore_long_piece_num_ - 1) =
+      std::max(0.12, (explore_long_fin_state_.col(0) - prev).norm() / std::max(0.1, pp_.max_vel_ * 0.8));
+
+  const double total_time = explore_long_times_.sum();
+  if (time_lb > 0.0 && total_time < time_lb) {
+    explore_long_times_ *= time_lb / std::max(1e-3, total_time);
+  }
+
+  if (total_wps > 0) {
+    explore_long_fused_wps_ =
+        explore_long_way_wps_ * explore_long_select_waypt_.transpose() +
+        explore_long_view_wps_ * explore_long_select_viewpt_.transpose();
+  } else {
+    explore_long_fused_wps_.resize(3, 0);
+  }
+
+  explore_long_minco_.setConditions(explore_long_ini_state_, explore_long_fin_state_,
+                                    explore_long_piece_num_);
+  explore_long_minco_.setParameters(explore_long_fused_wps_, explore_long_times_);
+  ROS_INFO_STREAM("[explore long] setup with pieces=" << explore_long_piece_num_
+                  << " waypoints=" << total_wps
+                  << " frozen_viewpoints="
+                  << (explore_long_target_yaws_.empty() ? 0 : explore_long_target_yaws_.size() - 1));
   return true;
 }
 
@@ -777,6 +1286,257 @@ void FastPlannerManager::computeExploreYawCostGrad(const Eigen::VectorXd& T, dou
   yaw_minco.propogateGrad(gdC, gdT_minco, gradP, gdT);
 }
 
+void FastPlannerManager::computeExploreLongConstraintCostGrad(double& cost, Eigen::MatrixX3d& gdC,
+                                                              Eigen::VectorXd& gdT) {
+  const int K = 64;
+  const double smooth_eps = pp_.minco_smooth_epsilon_;
+  const auto& coeffs = explore_long_minco_.getCoeffs();
+
+  cost = 0.0;
+  gdC.setZero(8 * explore_long_piece_num_, 3);
+  gdT.setZero(explore_long_piece_num_);
+
+  for (int i = 0; i < explore_long_piece_num_; ++i) {
+    const double T = explore_long_times_(i);
+    const double step = T / K;
+    int seg_idx = static_cast<int>(explore_long_ref_path_segments_.size()) - 1;
+    for (int k = 0; k < static_cast<int>(explore_long_viewpoint_piece_indices_.size()); ++k) {
+      if (i < explore_long_viewpoint_piece_indices_[k]) {
+        seg_idx = k;
+        break;
+      }
+    }
+    const vector<Eigen::Vector3d>& ref_pts =
+        (seg_idx >= 0 && seg_idx < static_cast<int>(explore_long_ref_path_segments_.size()) &&
+         !explore_long_ref_path_segments_[seg_idx].empty())
+            ? explore_long_ref_path_segments_[seg_idx]
+            : explore_long_ref_path_points_;
+
+    for (int j = 0; j <= K; ++j) {
+      const double node = (j == 0 || j == K) ? 0.5 : 1.0;
+      const double s = j * step;
+      const double s2 = s * s;
+      const double s3 = s2 * s;
+      const double s4 = s3 * s;
+      const double s5 = s4 * s;
+      const double s6 = s5 * s;
+      const double s7 = s6 * s;
+
+      Eigen::Matrix<double, 8, 1> beta0, beta1, beta2;
+      beta0 << 1.0, s, s2, s3, s4, s5, s6, s7;
+      beta1 << 0.0, 1.0, 2.0 * s, 3.0 * s2, 4.0 * s3, 5.0 * s4, 6.0 * s5, 7.0 * s6;
+      beta2 << 0.0, 0.0, 2.0, 6.0 * s, 12.0 * s2, 20.0 * s3, 30.0 * s4, 42.0 * s5;
+
+      const Eigen::Matrix<double, 8, 3> c = coeffs.block<8, 3>(8 * i, 0);
+      const Eigen::Vector3d pos = c.transpose() * beta0;
+      const Eigen::Vector3d vel = c.transpose() * beta1;
+      const Eigen::Vector3d acc = c.transpose() * beta2;
+
+      double pena = 0.0, pena_d = 0.0;
+      const double vel_violation = vel.squaredNorm() - pp_.max_vel_ * pp_.max_vel_;
+      if (smoothedL1(vel_violation, smooth_eps, pena, pena_d)) {
+        cost += pp_.minco_rho_v_ * pena * node * step;
+        const Eigen::Vector3d grad_vel = pp_.minco_rho_v_ * pena_d * 2.0 * vel;
+        gdC.block<8, 3>(8 * i, 0) += node * step * beta1 * grad_vel.transpose();
+      }
+
+      const double acc_violation = acc.squaredNorm() - pp_.max_acc_ * pp_.max_acc_;
+      if (smoothedL1(acc_violation, smooth_eps, pena, pena_d)) {
+        cost += pp_.minco_rho_a_ * pena * node * step;
+        const Eigen::Vector3d grad_acc = pp_.minco_rho_a_ * pena_d * 2.0 * acc;
+        gdC.block<8, 3>(8 * i, 0) += node * step * beta2 * grad_acc.transpose();
+      }
+
+      double dist = 0.0;
+      Eigen::Vector3d grad_obs = Eigen::Vector3d::Zero();
+      queryDistanceWithGrad(pos, dist, grad_obs);
+      const double coll_violation = pp_.minco_safe_distance_ - dist;
+      if (smoothedL1(coll_violation, smooth_eps, pena, pena_d)) {
+        cost += pp_.minco_rho_collision_ * pena * node * step;
+        const Eigen::Vector3d grad_coll = -pp_.minco_rho_collision_ * pena_d * grad_obs;
+        gdC.block<8, 3>(8 * i, 0) += node * step * beta0 * grad_coll.transpose();
+      }
+
+      if (!ref_pts.empty() && pp_.minco_rho_path_ > 0.0) {
+        double best_sq = std::numeric_limits<double>::infinity();
+        Eigen::Vector3d best_pt = ref_pts.front();
+        for (const auto& ref_pt : ref_pts) {
+          const double sq = (pos - ref_pt).squaredNorm();
+          if (sq < best_sq) {
+            best_sq = sq;
+            best_pt = ref_pt;
+          }
+        }
+        const Eigen::Vector3d diff = pos - best_pt;
+        cost += 0.5 * pp_.minco_rho_path_ * best_sq * node * step;
+        gdC.block<8, 3>(8 * i, 0) +=
+            node * step * beta0 * (pp_.minco_rho_path_ * diff).transpose();
+      }
+    }
+  }
+
+  if (explore_long_time_lb_ > 0.0) {
+    const double total_t = explore_long_times_.sum();
+    if (total_t < explore_long_time_lb_) {
+      const double diff = explore_long_time_lb_ - total_t;
+      const double rho_lb = 100.0;
+      cost += rho_lb * diff * diff;
+      gdT.array() -= 2.0 * rho_lb * diff;
+    }
+  }
+}
+
+void FastPlannerManager::computeExploreLongYawCostGrad(const Eigen::VectorXd& T, double& cost,
+                                                       Eigen::VectorXd& gdT) {
+  cost = 0.0;
+  gdT.setZero(T.size());
+  if (explore_long_target_yaws_.empty() || explore_long_viewpoint_piece_indices_.empty()) return;
+
+  Eigen::Vector3d start_yaw = Eigen::Vector3d::Zero();
+  if (!sampleCurrentYawState(local_data_, start_yaw)) {
+    start_yaw.x() = wrapAngle(explore_long_target_yaws_.front());
+  }
+
+  const int num_viewpoints = static_cast<int>(explore_long_target_yaws_.size());
+  Eigen::VectorXd yaw_times(num_viewpoints);
+  std::vector<double> arrival_times(num_viewpoints, 0.0);
+  double prev_arrival = 0.0;
+  for (int k = 0; k < num_viewpoints; ++k) {
+    double arrival = 0.0;
+    const int piece_end = explore_long_viewpoint_piece_indices_[k];
+    for (int i = 0; i < piece_end && i < T.size(); ++i) arrival += T(i);
+    arrival_times[k] = arrival;
+    yaw_times(k) = std::max(0.01, arrival - prev_arrival);
+    prev_arrival = arrival;
+  }
+  arrival_times.back() = T.sum();
+  yaw_times(num_viewpoints - 1) =
+      std::max(0.01, arrival_times.back() - (num_viewpoints > 1 ? arrival_times[num_viewpoints - 2] : 0.0));
+
+  std::vector<double> continuous_yaws(num_viewpoints);
+  double accumulated_yaw = start_yaw.x();
+  for (int i = 0; i < num_viewpoints; ++i) {
+    accumulated_yaw = unwrapTowards(accumulated_yaw, explore_long_target_yaws_[i]);
+    continuous_yaws[i] = accumulated_yaw;
+  }
+
+  Eigen::Matrix3d ini_state, fin_state;
+  ini_state << Eigen::Vector3d(start_yaw.x(), 0.0, 0.0), Eigen::Vector3d(start_yaw.y(), 0.0, 0.0),
+      Eigen::Vector3d(start_yaw.z(), 0.0, 0.0);
+  fin_state << Eigen::Vector3d(continuous_yaws.back(), 0.0, 0.0), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d::Zero();
+
+  Eigen::Matrix3Xd inner_points(3, std::max(0, num_viewpoints - 1));
+  for (int i = 0; i < num_viewpoints - 1; ++i) {
+    inner_points.col(i) << continuous_yaws[i], 0.0, 0.0;
+  }
+
+  minco::MINCO_S3NU yaw_minco;
+  yaw_minco.setConditions(ini_state, fin_state, num_viewpoints);
+  yaw_minco.setParameters(inner_points, yaw_times);
+
+  const double max_yaw_rate = pp_.max_yawdot_ > 1e-3 ? pp_.max_yawdot_ : 1.0;
+  const double max_yaw_rate_sq = max_yaw_rate * max_yaw_rate;
+  const double rho_yaw = std::max(1.0, pp_.minco_rho_v_);
+  Eigen::MatrixX3d gdC(6 * num_viewpoints, 3);
+  Eigen::VectorXd gdT_yaw(num_viewpoints);
+  gdC.setZero();
+  gdT_yaw.setZero();
+
+  const auto& coeffs = yaw_minco.getCoeffs();
+  static constexpr int K = 16;
+  for (int i = 0; i < num_viewpoints; ++i) {
+    const double duration = yaw_times(i);
+    const double step = duration / K;
+    for (int j = 0; j <= K; ++j) {
+      const double node = (j == 0 || j == K) ? 0.5 : 1.0;
+      const double s = j * step;
+      const double s2 = s * s;
+      const double s3 = s2 * s;
+      const double s4 = s3 * s;
+      Eigen::Matrix<double, 6, 1> beta1;
+      beta1 << 0.0, 1.0, 2.0 * s, 3.0 * s2, 4.0 * s3, 5.0 * s4;
+      const Eigen::Matrix<double, 6, 3> c = coeffs.block<6, 3>(6 * i, 0);
+      const Eigen::Vector3d yaw_vel_vec = c.transpose() * beta1;
+      const double yaw_vel = yaw_vel_vec.x();
+
+      double pena = 0.0, pena_d = 0.0;
+      const double violation = yaw_vel * yaw_vel - max_yaw_rate_sq;
+      if (smoothedL1(violation, std::max(1e-3, pp_.minco_smooth_epsilon_), pena, pena_d)) {
+        cost += rho_yaw * pena * node * step;
+        const Eigen::Vector3d grad_vel = rho_yaw * pena_d * 2.0 * yaw_vel_vec;
+        gdC.block<6, 3>(6 * i, 0) += node * step * beta1 * grad_vel.transpose();
+      }
+    }
+  }
+
+  Eigen::Matrix3Xd gradP;
+  Eigen::VectorXd gradT_minco;
+  yaw_minco.propogateGrad(gdC, gdT_yaw, gradP, gradT_minco);
+
+  for (int i = 0; i < T.size(); ++i) {
+    int vp_idx = num_viewpoints - 1;
+    for (int k = 0; k < num_viewpoints; ++k) {
+      if (i < explore_long_viewpoint_piece_indices_[k]) {
+        vp_idx = k;
+        break;
+      }
+    }
+    gdT(i) += gradT_minco(vp_idx);
+  }
+}
+
+void FastPlannerManager::computeExploreLongArrivalTimes(const Eigen::VectorXd& T) {
+  explore_long_viewpoint_arrival_times_.clear();
+  for (size_t vp_idx = 0; vp_idx < explore_long_viewpoint_piece_indices_.size(); ++vp_idx) {
+    double arrival = 0.0;
+    const int piece_end = explore_long_viewpoint_piece_indices_[vp_idx];
+    for (int i = 0; i < piece_end && i < T.size(); ++i) arrival += T(i);
+    explore_long_viewpoint_arrival_times_.push_back(arrival);
+  }
+  if (!explore_long_viewpoint_arrival_times_.empty()) {
+    explore_long_viewpoint_arrival_times_.back() = T.sum();
+  }
+}
+
+bool FastPlannerManager::buildExploreLongYawTraj(const Eigen::Vector3d& start_yaw,
+                                                 Trajectory<5>& yaw_traj) {
+  if (explore_long_target_yaws_.empty() || explore_long_viewpoint_arrival_times_.empty()) return false;
+
+  Eigen::Vector3d yaw_state = start_yaw;
+  sampleCurrentYawState(local_data_, yaw_state);
+  const int num_viewpoints = static_cast<int>(explore_long_target_yaws_.size());
+  Eigen::VectorXd yaw_times(num_viewpoints);
+  for (int i = 0; i < num_viewpoints; ++i) {
+    const double prev = (i == 0) ? 0.0 : explore_long_viewpoint_arrival_times_[i - 1];
+    yaw_times(i) = std::max(0.01, explore_long_viewpoint_arrival_times_[i] - prev);
+  }
+
+  std::vector<double> continuous_yaws(num_viewpoints);
+  double accumulated_yaw = yaw_state.x();
+  for (int i = 0; i < num_viewpoints; ++i) {
+    accumulated_yaw = unwrapTowards(accumulated_yaw, explore_long_target_yaws_[i]);
+    continuous_yaws[i] = accumulated_yaw;
+  }
+
+  Eigen::Matrix3d ini_state, fin_state;
+  ini_state << Eigen::Vector3d(yaw_state.x(), 0.0, 0.0), Eigen::Vector3d(yaw_state.y(), 0.0, 0.0),
+      Eigen::Vector3d(yaw_state.z(), 0.0, 0.0);
+  fin_state << Eigen::Vector3d(continuous_yaws.back(), 0.0, 0.0), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d::Zero();
+
+  Eigen::Matrix3Xd inner_points(3, std::max(0, num_viewpoints - 1));
+  for (int i = 0; i < num_viewpoints - 1; ++i) {
+    inner_points.col(i) << continuous_yaws[i], 0.0, 0.0;
+  }
+
+  minco::MINCO_S3NU yaw_minco;
+  yaw_minco.setConditions(ini_state, fin_state, num_viewpoints);
+  yaw_minco.setParameters(inner_points, yaw_times);
+  yaw_minco.getTrajectory(yaw_traj);
+  return true;
+}
+
 double FastPlannerManager::innerCallbackExplore(void* ptrObj, const Eigen::VectorXd& x,
                                                 Eigen::VectorXd& grad) {
   FastPlannerManager& obj = *(FastPlannerManager*)ptrObj;
@@ -849,11 +1609,233 @@ double FastPlannerManager::innerCallbackExplore(void* ptrObj, const Eigen::Vecto
   return snap_cost + constraint_cost + time_cost;
 }
 
+double FastPlannerManager::innerCallbackExploreLong(void* ptrObj, const Eigen::VectorXd& x,
+                                                    Eigen::VectorXd& grad) {
+  FastPlannerManager& obj = *(FastPlannerManager*)ptrObj;
+  Eigen::Map<const Eigen::VectorXd> tau(x.data(), obj.explore_long_piece_num_);
+  Eigen::Map<Eigen::VectorXd> grad_tau(grad.data(), obj.explore_long_piece_num_);
+
+  Eigen::VectorXd T;
+  forwardTLocal(tau, T);
+  obj.explore_long_times_ = T;
+
+  if (obj.explore_long_waypt_count_ > 0) {
+    Eigen::Map<const Eigen::Matrix3Xd> wps(x.data() + obj.explore_long_piece_num_, 3,
+                                           obj.explore_long_waypt_count_);
+    obj.explore_long_way_wps_ = wps;
+    Eigen::Vector3d box_min, box_max;
+    obj.sdf_map_->getBox(box_min, box_max);
+    const double margin = std::max(1e-3, 0.5 * obj.sdf_map_->getResolution());
+    for (int i = 0; i < obj.explore_long_waypt_count_; ++i) {
+      obj.explore_long_way_wps_.col(i) =
+          obj.explore_long_way_wps_.col(i)
+              .cwiseMax(box_min + margin * Eigen::Vector3d::Ones())
+              .cwiseMin(box_max - margin * Eigen::Vector3d::Ones());
+    }
+  }
+
+  if (obj.explore_long_all_wps_.cols() > 0) {
+    obj.explore_long_fused_wps_ =
+        obj.explore_long_way_wps_ * obj.explore_long_select_waypt_.transpose() +
+        obj.explore_long_view_wps_ * obj.explore_long_select_viewpt_.transpose();
+  } else {
+    obj.explore_long_fused_wps_.resize(3, 0);
+  }
+
+  obj.explore_long_minco_.setParameters(obj.explore_long_fused_wps_, T);
+
+  double snap_cost = 0.0;
+  obj.explore_long_minco_.getEnergy(snap_cost);
+  Eigen::MatrixX3d gdC_snap;
+  obj.explore_long_minco_.getEnergyPartialGradByCoeffs(gdC_snap);
+  Eigen::VectorXd gdT_snap;
+  obj.explore_long_minco_.getEnergyPartialGradByTimes(gdT_snap);
+
+  double constraint_cost = 0.0;
+  Eigen::MatrixX3d gdC_constrain;
+  Eigen::VectorXd gdT_constrain;
+  obj.computeExploreLongConstraintCostGrad(constraint_cost, gdC_constrain, gdT_constrain);
+
+  double yaw_cost = 0.0;
+  Eigen::VectorXd gdT_yaw(T.size());
+  gdT_yaw.setZero();
+  obj.computeExploreLongYawCostGrad(T, yaw_cost, gdT_yaw);
+  constraint_cost += yaw_cost;
+  gdT_constrain += gdT_yaw;
+
+  const double time_cost = obj.pp_.minco_weight_time_ * T.sum();
+
+  Eigen::MatrixX3d gdC = gdC_snap + gdC_constrain;
+  Eigen::VectorXd gdT = gdT_snap + gdT_constrain;
+  gdT.array() += obj.pp_.minco_weight_time_;
+
+  Eigen::Matrix3Xd gradP;
+  Eigen::VectorXd gradT;
+  obj.explore_long_minco_.propogateGrad(gdC, gdT, gradP, gradT);
+
+  Eigen::VectorXd grad_tau_vec;
+  backwardGradTLocal(tau, gradT, grad_tau_vec);
+  grad_tau = grad_tau_vec;
+
+  if (obj.explore_long_waypt_count_ > 0) {
+    Eigen::Map<Eigen::Matrix3Xd> grad_wps(grad.data() + obj.explore_long_piece_num_, 3,
+                                          obj.explore_long_waypt_count_);
+    grad_wps = gradP * obj.explore_long_select_waypt_;
+  }
+
+  return snap_cost + constraint_cost + time_cost;
+}
+
+bool FastPlannerManager::planExploreTrajLong(const vector<PathSegmentWithYaw>& segments,
+                                             const Eigen::Vector3d& cur_vel,
+                                             const Eigen::Vector3d& cur_acc,
+                                             const double& time_lb) {
+  if (segments.empty()) return false;
+  vector<PathSegmentWithYaw> safe_segments = segments;
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    if (!setupExploreLongMinco(safe_segments, cur_vel, cur_acc, time_lb)) {
+      ROS_ERROR("Failed to setup long exploration MINCO.");
+      return false;
+    }
+
+    const Eigen::VectorXd base_times = explore_long_times_;
+    const Eigen::Matrix3Xd base_way_wps = explore_long_way_wps_;
+    const int opt_dim = explore_long_piece_num_ + 3 * explore_long_waypt_count_;
+    lbfgs::lbfgs_parameter_t params;
+    params.mem_size = 128;
+    params.past = 3;
+    params.g_epsilon = 0.0;
+    params.min_step = 1.0e-32;
+    params.delta = pp_.minco_lbfgs_delta_;
+    params.max_linesearch = 256;
+    params.max_iterations = pp_.minco_lbfgs_max_iter_;
+
+    Eigen::VectorXd x(opt_dim);
+    bool accepted = false;
+    bool used_fallback = false;
+    const std::array<double, 3> time_scales = {1.0, 1.35, 1.8};
+    for (size_t retry = 0; retry < time_scales.size(); ++retry) {
+      explore_long_times_ = base_times * time_scales[retry];
+      explore_long_way_wps_ = base_way_wps;
+      if (explore_long_all_wps_.cols() > 0) {
+        explore_long_fused_wps_ =
+            explore_long_way_wps_ * explore_long_select_waypt_.transpose() +
+            explore_long_view_wps_ * explore_long_select_viewpt_.transpose();
+      } else {
+        explore_long_fused_wps_.resize(3, 0);
+      }
+      explore_long_minco_.setParameters(explore_long_fused_wps_, explore_long_times_);
+
+      Eigen::VectorXd tau;
+      backwardTLocal(explore_long_times_, tau);
+      x.head(explore_long_piece_num_) = tau;
+      if (explore_long_waypt_count_ > 0) {
+        Eigen::Map<Eigen::VectorXd> waypt_vec(explore_long_way_wps_.data(),
+                                              3 * explore_long_waypt_count_);
+        x.tail(3 * explore_long_waypt_count_) = waypt_vec;
+      }
+
+      double final_cost = 0.0;
+      const int result =
+          lbfgs::lbfgs_optimize(x, final_cost, &FastPlannerManager::innerCallbackExploreLong, nullptr,
+                                nullptr, this, params);
+      const bool ok = lbfgsReturnedUsableSolution(result);
+      if (ok) {
+        accepted = true;
+        break;
+      }
+
+      ROS_WARN_STREAM("Explore long MINCO optimization returned " << result << ": "
+                                                                  << lbfgs::lbfgs_strerror(result)
+                                                                  << ", retry_scale=" << time_scales[retry]);
+    }
+
+    if (accepted) {
+      Eigen::Map<const Eigen::VectorXd> final_tau(x.data(), explore_long_piece_num_);
+      Eigen::VectorXd final_T;
+      forwardTLocal(final_tau, final_T);
+      explore_long_times_ = final_T;
+      if (explore_long_waypt_count_ > 0) {
+        Eigen::Map<const Eigen::Matrix3Xd> final_wps(x.data() + explore_long_piece_num_, 3,
+                                                     explore_long_waypt_count_);
+        explore_long_way_wps_ = final_wps;
+        explore_long_fused_wps_ =
+            explore_long_way_wps_ * explore_long_select_waypt_.transpose() +
+            explore_long_view_wps_ * explore_long_select_viewpt_.transpose();
+      }
+      explore_long_minco_.setParameters(explore_long_fused_wps_, explore_long_times_);
+    } else {
+      used_fallback = true;
+      explore_long_times_ = base_times * time_scales.back();
+      explore_long_way_wps_ = base_way_wps;
+      if (explore_long_all_wps_.cols() > 0) {
+        explore_long_fused_wps_ =
+            explore_long_way_wps_ * explore_long_select_waypt_.transpose() +
+            explore_long_view_wps_ * explore_long_select_viewpt_.transpose();
+      } else {
+        explore_long_fused_wps_.resize(3, 0);
+      }
+      explore_long_minco_.setParameters(explore_long_fused_wps_, explore_long_times_);
+      ROS_WARN_STREAM("Explore long MINCO fell back to conservative timing on attempt "
+                      << attempt + 1 << ", time_scale=" << time_scales.back());
+    }
+
+    explore_long_minco_.getTrajectory(local_data_.minco_traj_);
+    local_data_.duration_ = local_data_.minco_traj_.getTotalDuration();
+    local_data_.start_pos_ = explore_long_ini_state_.col(0);
+    local_data_.use_minco_ = true;
+
+    const MincoTrajStats long_stats_before_validate =
+        evaluateMincoTrajStats(local_data_.minco_traj_, this, defaultExploreStep(sdf_map_));
+    const double long_time_stretch = computeExploreTimeStretch(long_stats_before_validate, pp_);
+    if (long_time_stretch > 1.0) {
+      explore_long_times_ *= long_time_stretch;
+      explore_long_minco_.setParameters(explore_long_fused_wps_, explore_long_times_);
+      explore_long_minco_.getTrajectory(local_data_.minco_traj_);
+      local_data_.duration_ = local_data_.minco_traj_.getTotalDuration();
+      ROS_WARN_STREAM("[explore long] stretched timing by " << long_time_stretch
+                      << " before validation to reduce dynamic limit violations.");
+    }
+
+    if (!validateActiveTrajInExploreSpace()) {
+      ROS_WARN_STREAM("Long exploration trajectory leaves exploration space on attempt "
+                      << attempt + 1 << ".");
+      subdividePathSegments(safe_segments);
+      continue;
+    }
+
+    computeExploreLongArrivalTimes(explore_long_times_);
+    Eigen::Vector3d start_yaw = Eigen::Vector3d::Zero();
+    if (!sampleCurrentYawState(local_data_, start_yaw)) start_yaw.setZero();
+    if (!buildExploreLongYawTraj(start_yaw, local_data_.minco_yaw_traj_)) {
+      ROS_ERROR("Failed to build long exploration yaw trajectory.");
+      return false;
+    }
+
+    local_data_.traj_id_ += 1;
+    logMincoTrajStats(local_data_.minco_traj_, this, defaultExploreStep(sdf_map_));
+    if (used_fallback) {
+      ROS_WARN("[explore long] using fallback trajectory after optimizer failure.");
+    }
+    for (size_t i = 0; i < explore_long_viewpoint_arrival_times_.size(); ++i) {
+      ROS_INFO_STREAM("[explore long] viewpoint " << i
+                      << " piece_end=" << explore_long_viewpoint_piece_indices_[i]
+                      << " arrival=" << explore_long_viewpoint_arrival_times_[i]);
+    }
+    return true;
+  }
+
+  ROS_ERROR("Long exploration trajectory cannot be constrained within exploration space.");
+  return false;
+}
+
 bool FastPlannerManager::solveMincoPositionTraj(const vector<Eigen::Vector3d>& tour,
                                                 const Eigen::Vector3d& cur_vel,
                                                 const Eigen::Vector3d& cur_acc,
                                                 const double& time_lb,
-                                                const double target_yaw) {
+                                                const double target_yaw,
+                                                const Eigen::Vector3d& terminal_vel,
+                                                const bool stop_at_goal) {
   if (tour.size() < 2) return false;
 
   vector<Eigen::Vector3d> safe_tour;
@@ -864,7 +1846,8 @@ bool FastPlannerManager::solveMincoPositionTraj(const vector<Eigen::Vector3d>& t
   }
 
   for (int attempt = 0; attempt < 4; ++attempt) {
-    if (!setupExploreMinco(safe_tour, cur_vel, cur_acc, time_lb)) return false;
+    if (!setupExploreMinco(safe_tour, cur_vel, cur_acc, time_lb, terminal_vel, stop_at_goal))
+      return false;
     explore_target_yaw_ = target_yaw;
 
     const int opt_dim = explore_piece_num_ + 3 * explore_inner_count_;
@@ -878,7 +1861,7 @@ bool FastPlannerManager::solveMincoPositionTraj(const vector<Eigen::Vector3d>& t
     }
 
     lbfgs::lbfgs_parameter_t params;
-    params.mem_size = 64;
+    params.mem_size = 128;
     params.past = 3;
     params.g_epsilon = 0.0;
     params.min_step = 1.0e-32;
@@ -890,11 +1873,21 @@ bool FastPlannerManager::solveMincoPositionTraj(const vector<Eigen::Vector3d>& t
     const int result =
         lbfgs::lbfgs_optimize(x, final_cost, &FastPlannerManager::innerCallbackExplore, nullptr,
                               nullptr, this, params);
-    if (!(result == lbfgs::LBFGS_CONVERGENCE || result == lbfgs::LBFGS_STOP ||
-          result == lbfgs::LBFGS_CANCELED ||
-          result == lbfgs::LBFGSERR_MAXIMUMITERATION)) {
+    if (!lbfgsReturnedUsableSolution(result)) {
       ROS_WARN_STREAM("Explore MINCO optimization returned " << result << ": "
                                                              << lbfgs::lbfgs_strerror(result));
+      subdividePath(safe_tour);
+      vector<Eigen::Vector3d> repaired_tour;
+      if (!sanitizeExplorePath(safe_tour, repaired_tour,
+                               std::max(0.15, pp_.ctrl_pt_dist * 0.35))) {
+        break;
+      }
+      if (repaired_tour.size() == 2) {
+        repaired_tour.insert(repaired_tour.begin() + 1,
+                             0.5 * (repaired_tour.front() + repaired_tour.back()));
+      }
+      safe_tour.swap(repaired_tour);
+      continue;
     }
 
     explore_minco_.getTrajectory(local_data_.minco_traj_);
@@ -902,7 +1895,22 @@ bool FastPlannerManager::solveMincoPositionTraj(const vector<Eigen::Vector3d>& t
     local_data_.start_pos_ = safe_tour.front();
     local_data_.use_minco_ = true;
 
-    if (validateActiveTrajInExploreSpace()) return true;
+    const MincoTrajStats explore_stats_before_validate =
+        evaluateMincoTrajStats(local_data_.minco_traj_, this, defaultExploreStep(sdf_map_));
+    const double explore_time_stretch = computeExploreTimeStretch(explore_stats_before_validate, pp_);
+    if (explore_time_stretch > 1.0) {
+      explore_times_ *= explore_time_stretch;
+      explore_minco_.setParameters(explore_inner_wps_, explore_times_);
+      explore_minco_.getTrajectory(local_data_.minco_traj_);
+      local_data_.duration_ = local_data_.minco_traj_.getTotalDuration();
+      ROS_WARN_STREAM("[explore minco] stretched timing by " << explore_time_stretch
+                      << " before validation to reduce dynamic limit violations.");
+    }
+
+    if (validateActiveTrajInExploreSpace()) {
+      logMincoTrajStats(local_data_.minco_traj_, this, defaultExploreStep(sdf_map_));
+      return true;
+    }
 
     ROS_WARN_STREAM("Optimized MINCO trajectory leaves exploration space on attempt "
                     << attempt + 1 << ".");
@@ -1176,17 +2184,19 @@ bool FastPlannerManager::kinodynamicReplan(const Eigen::Vector3d& start_pt,
 
 bool FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
     const Eigen::Vector3d& cur_vel, const Eigen::Vector3d& cur_acc, const double& time_lb) {
-  return planExploreTraj(tour, cur_vel, cur_acc, time_lb, std::numeric_limits<double>::quiet_NaN());
+  return planExploreTraj(tour, cur_vel, cur_acc, time_lb,
+                         std::numeric_limits<double>::quiet_NaN(), Eigen::Vector3d::Zero(), true);
 }
 
 bool FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
     const Eigen::Vector3d& cur_vel, const Eigen::Vector3d& cur_acc, const double& time_lb,
-    const double target_yaw) {
+    const double target_yaw, const Eigen::Vector3d& terminal_vel, const bool stop_at_goal) {
   if (tour.empty()) {
     ROS_ERROR("Empty path to traj planner");
     return false;
   }
-  if (!solveMincoPositionTraj(tour, cur_vel, cur_acc, time_lb, target_yaw)) {
+  if (!solveMincoPositionTraj(tour, cur_vel, cur_acc, time_lb, target_yaw, terminal_vel,
+                              stop_at_goal)) {
     ROS_ERROR("MINCO position solve failed.");
     return false;
   }
@@ -1197,12 +2207,21 @@ bool FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
 bool FastPlannerManager::validateActiveTrajInExploreSpace(double sample_step) {
   const double step = sample_step > 0.0 ? sample_step : defaultExploreStep(sdf_map_);
   if (local_data_.duration_ <= 0.0) return false;
+  const ExploreAcceptanceLimits limits = getExploreAcceptanceLimits(pp_);
+  const double strict_horizon =
+      std::max(step, std::min(local_data_.duration_, std::max(0.5, pp_.explore_strict_horizon_)));
   const double soft_safe_margin = std::max(0.05, 0.5 * pp_.minco_safe_distance_);
   const double hard_safe_margin = std::max(0.01, 0.08 * pp_.minco_safe_distance_);
   int soft_violation_num = 0;
   double min_dist = std::numeric_limits<double>::infinity();
   double min_dist_t = 0.0;
   Eigen::Vector3d min_dist_pt = Eigen::Vector3d::Zero();
+  double min_dist_strict = std::numeric_limits<double>::infinity();
+  double min_dist_strict_t = 0.0;
+  Eigen::Vector3d min_dist_strict_pt = Eigen::Vector3d::Zero();
+  double max_vel = 0.0;
+  double max_acc = 0.0;
+  double max_jerk = 0.0;
 
   for (double t = 0.0; t <= local_data_.duration_ + 1e-6; t += step) {
     const double tc = std::min(local_data_.duration_, t);
@@ -1211,6 +2230,11 @@ bool FastPlannerManager::validateActiveTrajInExploreSpace(double sample_step) {
       pt = local_data_.minco_traj_.getPos(tc);
     else
       pt = local_data_.position_traj_.evaluateDeBoorT(tc);
+    if (local_data_.use_minco_) {
+      max_vel = std::max(max_vel, local_data_.minco_traj_.getVel(tc).norm());
+      max_acc = std::max(max_acc, local_data_.minco_traj_.getAcc(tc).norm());
+      max_jerk = std::max(max_jerk, local_data_.minco_traj_.getJer(tc).norm());
+    }
     double dist = 0.0;
     Eigen::Vector3d grad = Eigen::Vector3d::Zero();
     queryDistanceWithGrad(pt, dist, grad);
@@ -1218,6 +2242,11 @@ bool FastPlannerManager::validateActiveTrajInExploreSpace(double sample_step) {
       min_dist = dist;
       min_dist_t = tc;
       min_dist_pt = pt;
+    }
+    if (tc <= strict_horizon && dist < min_dist_strict) {
+      min_dist_strict = dist;
+      min_dist_strict_t = tc;
+      min_dist_strict_pt = pt;
     }
     if (dist < hard_safe_margin) {
       ROS_WARN_STREAM("Trajectory sample too close to obstacle at t=" << tc << ", dist=" << dist
@@ -1236,6 +2265,42 @@ bool FastPlannerManager::validateActiveTrajInExploreSpace(double sample_step) {
                                                                      << " Closest sample: dist=" << min_dist
                                                                      << " at t=" << min_dist_t << ", pt="
                                                                      << min_dist_pt.transpose());
+  }
+  if (!std::isfinite(min_dist_strict)) {
+    min_dist_strict = min_dist;
+    min_dist_strict_t = min_dist_t;
+    min_dist_strict_pt = min_dist_pt;
+  }
+  if (local_data_.use_minco_ && min_dist_strict < limits.reject_safe_margin) {
+    ROS_WARN_STREAM("Rejecting MINCO trajectory: min_obs_dist=" << min_dist_strict
+                                                                << " below release threshold "
+                                                                << limits.reject_safe_margin << " at t="
+                                                                << min_dist_strict_t
+                                                                << " within strict horizon " << strict_horizon
+                                                                << ", pt=" << min_dist_strict_pt.transpose());
+    return false;
+  }
+  if (local_data_.use_minco_ && min_dist < limits.reject_safe_margin &&
+      min_dist_t > strict_horizon + 1e-6) {
+    ROS_WARN_STREAM("Accepting exploration trajectory with tail clearance " << min_dist
+                    << " below release threshold " << limits.reject_safe_margin
+                    << " because the violation is beyond strict horizon " << strict_horizon
+                    << " at t=" << min_dist_t << ", pt=" << min_dist_pt.transpose());
+  }
+  if (local_data_.use_minco_ && max_vel > limits.vel) {
+    ROS_WARN_STREAM("Rejecting MINCO trajectory: max_vel=" << max_vel
+                                                           << " exceeds limit " << limits.vel);
+    return false;
+  }
+  if (local_data_.use_minco_ && max_acc > limits.acc) {
+    ROS_WARN_STREAM("Rejecting MINCO trajectory: max_acc=" << max_acc
+                                                           << " exceeds limit " << limits.acc);
+    return false;
+  }
+  if (local_data_.use_minco_ && max_jerk > limits.jerk) {
+    ROS_WARN_STREAM("Rejecting MINCO trajectory: max_jerk=" << max_jerk
+                                                            << " exceeds limit " << limits.jerk);
+    return false;
   }
   return true;
 }
@@ -1568,7 +2633,8 @@ void FastPlannerManager::findCollisionRange(vector<Eigen::Vector3d>& colli_start
   initial_traj->getTimeSpan(t_m, t_mp);
 
   /* find range of collision */
-  double t_s = -1.0, t_e;
+  double t_s = -1.0;
+  double t_e = t_mp;
   for (double tc = t_m; tc <= t_mp + 1e-4; tc += 0.05) {
     Eigen::Vector3d ptc = initial_traj->evaluateDeBoor(tc);
     safe = edt_environment_->evaluateCoarseEDT(ptc, -1.0) < topo_prm_->clearance_ ? false : true;
@@ -1590,7 +2656,7 @@ void FastPlannerManager::findCollisionRange(vector<Eigen::Vector3d>& colli_start
 
   /* find start and end safe segment */
   double dt = initial_traj->getKnotSpan();
-  int sn = ceil((t_s - t_m) / dt);
+  int sn = std::max(1, static_cast<int>(ceil((t_s - t_m) / dt)));
   dt = (t_s - t_m) / sn;
 
   for (double tc = t_m; tc <= t_s + 1e-4; tc += dt) {
@@ -1598,7 +2664,7 @@ void FastPlannerManager::findCollisionRange(vector<Eigen::Vector3d>& colli_start
   }
 
   dt = initial_traj->getKnotSpan();
-  sn = ceil((t_mp - t_e) / dt);
+  sn = std::max(1, static_cast<int>(ceil((t_mp - t_e) / dt)));
   dt = (t_mp - t_e) / sn;
   // std::cout << "dt: " << dt << std::endl;
   // std::cout << "sn: " << sn << std::endl;

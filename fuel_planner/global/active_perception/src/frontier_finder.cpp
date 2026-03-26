@@ -571,7 +571,8 @@ void FrontierFinder::getFullCostMatrix(
 void FrontierFinder::findViewpoints(
     const Vector3d& sample, const Vector3d& ftr_avg, vector<Viewpoint>& vps) {
   if (!edt_env_->sdf_map_->isInBox(sample) ||
-      edt_env_->sdf_map_->getInflateOccupancy(sample) == 1 || isNearUnknown(sample))
+      edt_env_->sdf_map_->getInflateOccupancy(sample) == 1 || !hasInflatedObstacleClearance(sample) ||
+      isNearUnknown(sample))
     return;
 
   double left_angle_, right_angle_, vertical_angle_, ray_length_;
@@ -638,14 +639,20 @@ void FrontierFinder::findViewpoints(
 // Sample viewpoints around frontier's average position, check coverage to the frontier cells
 void FrontierFinder::sampleViewpoints(Frontier& frontier) {
   // Evaluate sample viewpoints on circles, find ones that cover most cells
-  for (double rc = candidate_rmin_, dr = (candidate_rmax_ - candidate_rmin_) / candidate_rnum_;
-       rc <= candidate_rmax_ + 1e-3; rc += dr)
+  const double effective_rmin =
+      std::max(candidate_rmin_, min_candidate_clearance_ + std::max(0.8, 8.0 * resolution_));
+  const double effective_rmax = std::max(candidate_rmax_, effective_rmin + std::max(0.6, 6.0 * resolution_));
+  const double dr = (effective_rmax - effective_rmin) / std::max(1, candidate_rnum_);
+  for (double rc = effective_rmin; rc <= effective_rmax + 1e-3; rc += dr)
     for (double phi = -M_PI; phi < M_PI; phi += candidate_dphi_) {
       const Vector3d sample_pos = frontier.average_ + rc * Vector3d(cos(phi), sin(phi), 0);
 
       // Qualified viewpoint is in bounding box and in safe region
       if (!edt_env_->sdf_map_->isInBox(sample_pos) ||
-          edt_env_->sdf_map_->getInflateOccupancy(sample_pos) == 1 || isNearUnknown(sample_pos))
+          edt_env_->sdf_map_->getInflateOccupancy(sample_pos) == 1 ||
+          !hasInflatedObstacleClearance(sample_pos) || isNearUnknown(sample_pos) ||
+          !hasSufficientViewpointClearance(sample_pos) || !hasDenseFreeNeighborhood(sample_pos) ||
+          isNearOtherFrontiers(sample_pos, frontier))
         continue;
 
       // Compute average yaw
@@ -704,6 +711,97 @@ bool FrontierFinder::isNearUnknown(const Eigen::Vector3d& pos) {
         vox << pos[0] + x * resolution_, pos[1] + y * resolution_, pos[2] + z * resolution_;
         if (edt_env_->sdf_map_->getOccupancy(vox) == SDFMap::UNKNOWN) return true;
       }
+  return false;
+}
+
+bool FrontierFinder::hasInflatedObstacleClearance(const Eigen::Vector3d& pos) const {
+  if (!edt_env_ || !edt_env_->sdf_map_) return false;
+
+  const double inflate_margin_xy = std::max(0.15, 1.5 * resolution_);
+  const double inflate_margin_z = std::max(0.1, resolution_);
+  const int vox_xy = std::max(1, static_cast<int>(std::ceil(inflate_margin_xy / resolution_)));
+  const int vox_z = std::max(1, static_cast<int>(std::ceil(inflate_margin_z / resolution_)));
+
+  for (int x = -vox_xy; x <= vox_xy; ++x) {
+    for (int y = -vox_xy; y <= vox_xy; ++y) {
+      for (int z = -vox_z; z <= vox_z; ++z) {
+        Eigen::Vector3d vox;
+        vox << pos[0] + x * resolution_, pos[1] + y * resolution_, pos[2] + z * resolution_;
+        if (!edt_env_->sdf_map_->isInBox(vox)) return false;
+        if (edt_env_->sdf_map_->getInflateOccupancy(vox) == 1) return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool FrontierFinder::hasSufficientViewpointClearance(const Eigen::Vector3d& pos) const {
+  if (!edt_env_) return false;
+  double dist = 0.0;
+  Eigen::Vector3d grad = Eigen::Vector3d::Zero();
+  edt_env_->evaluateEDTWithGrad(pos, -1.0, dist, grad);
+  if (!std::isfinite(dist)) return false;
+  const double clearance_thresh =
+      std::max(0.3, min_candidate_clearance_ + std::max(0.1, 2.0 * resolution_));
+  return dist >= clearance_thresh;
+}
+
+bool FrontierFinder::hasDenseFreeNeighborhood(const Eigen::Vector3d& pos) const {
+  if (!edt_env_ || !edt_env_->sdf_map_) return false;
+
+  const int vox_xy = std::max(1, static_cast<int>(std::ceil(std::max(0.35, min_candidate_clearance_) / resolution_)));
+  const int vox_z = std::max(1, static_cast<int>(std::ceil(std::max(0.2, 0.5 * min_candidate_clearance_) / resolution_)));
+  int free_cnt = 0;
+  int total_cnt = 0;
+  int unknown_cnt = 0;
+
+  for (int x = -vox_xy; x <= vox_xy; ++x) {
+    for (int y = -vox_xy; y <= vox_xy; ++y) {
+      for (int z = -vox_z; z <= vox_z; ++z) {
+        Eigen::Vector3d vox;
+        vox << pos[0] + x * resolution_, pos[1] + y * resolution_, pos[2] + z * resolution_;
+        if (!edt_env_->sdf_map_->isInBox(vox)) return false;
+        ++total_cnt;
+        const int occ = edt_env_->sdf_map_->getOccupancy(vox);
+        if (occ == SDFMap::FREE) {
+          ++free_cnt;
+        } else if (occ == SDFMap::UNKNOWN) {
+          ++unknown_cnt;
+        }
+      }
+    }
+  }
+
+  if (total_cnt <= 0) return false;
+  const double free_ratio = static_cast<double>(free_cnt) / static_cast<double>(total_cnt);
+  const double unknown_ratio = static_cast<double>(unknown_cnt) / static_cast<double>(total_cnt);
+  return free_ratio >= 0.75 && unknown_ratio <= 0.1;
+}
+
+bool FrontierFinder::isNearOtherFrontiers(const Eigen::Vector3d& pos, const Frontier& self) const {
+  const double min_frontier_sep =
+      std::max(min_candidate_dist_, min_candidate_clearance_ + std::max(0.4, 4.0 * resolution_));
+  const double min_frontier_sep_sq = min_frontier_sep * min_frontier_sep;
+
+  auto too_close_to_frontier = [&](const Frontier& frontier) {
+    if ((frontier.average_ - self.average_).norm() < 1e-3) return false;
+    if ((frontier.average_ - pos).squaredNorm() < min_frontier_sep_sq) return true;
+    for (const auto& cell : frontier.filtered_cells_) {
+      if ((cell - pos).squaredNorm() < min_frontier_sep_sq) return true;
+    }
+    return false;
+  };
+
+  for (const auto& frontier : frontiers_) {
+    if (too_close_to_frontier(frontier)) return true;
+  }
+  for (const auto& frontier : dormant_frontiers_) {
+    if (too_close_to_frontier(frontier)) return true;
+  }
+  for (const auto& frontier : tmp_frontiers_) {
+    if (too_close_to_frontier(frontier)) return true;
+  }
   return false;
 }
 

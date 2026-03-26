@@ -12,6 +12,17 @@
 #include <plan_manage/planner_manager.h>
 
 namespace fast_planner {
+namespace {
+double wrapYaw(double yaw) {
+  while (yaw > M_PI) yaw -= 2.0 * M_PI;
+  while (yaw < -M_PI) yaw += 2.0 * M_PI;
+  return yaw;
+}
+
+double unwrapYawToward(double reference, double target) {
+  return reference + wrapYaw(target - reference);
+}
+}  // namespace
 
 void GlobalExplorationPlanner::initialize(
     const shared_ptr<FrontierFinder>& frontier_finder,
@@ -25,11 +36,15 @@ void GlobalExplorationPlanner::initialize(
 }
 
 int GlobalExplorationPlanner::computeNextViewpoint(
-    const Vector3d& pos, const Vector3d& vel, const Vector3d& yaw, Vector3d& next_pos,
-    double& next_yaw) {
+    const Vector3d& pos, const Vector3d& vel, const Vector3d& yaw, vector<PathSegmentWithYaw>& path_segments) {
   ros::Time t1 = ros::Time::now();
   ed_->views_.clear();
   ed_->global_tour_.clear();
+  ed_->lookahead_goals_.clear();
+  ed_->lookahead_yaws_.clear();
+  ed_->lookahead_path_segments_.clear();
+  ed_->lookahead_arrival_times_.clear();
+  path_segments.clear();
 
   frontier_finder_->searchFrontiers();
 
@@ -57,6 +72,8 @@ int GlobalExplorationPlanner::computeNextViewpoint(
       "Frontier: %zu, t: %lf, viewpoint: %zu, t: %lf", ed_->frontiers_.size(), frontier_time,
       ed_->points_.size(), view_time);
 
+  vector<Vector3d> next_positions;
+  vector<double> next_yaws;
   if (ed_->points_.size() > 1) {
     vector<int> indices;
     findGlobalTour(pos, vel, yaw, indices);
@@ -83,8 +100,11 @@ int GlobalExplorationPlanner::computeNextViewpoint(
       ed_->refined_views_.clear();
       vector<double> refined_yaws;
       refineLocalTour(pos, vel, yaw, ed_->n_points_, n_yaws, ed_->refined_points_, refined_yaws);
-      next_pos = ed_->refined_points_[0];
-      next_yaw = refined_yaws[0];
+      const int horizon_num = std::min(3, static_cast<int>(ed_->refined_points_.size()));
+      for (int i = 0; i < horizon_num; ++i) {
+        next_positions.push_back(ed_->refined_points_[i]);
+        next_yaws.push_back(refined_yaws[i]);
+      }
 
       for (int i = 0; i < ed_->refined_points_.size(); ++i) {
         Vector3d view = ed_->refined_points_[i] +
@@ -103,8 +123,11 @@ int GlobalExplorationPlanner::computeNextViewpoint(
       double local_time = (ros::Time::now() - t1).toSec();
       ROS_WARN("Local refine time: %lf", local_time);
     } else {
-      next_pos = ed_->points_[indices[0]];
-      next_yaw = ed_->yaws_[indices[0]];
+      const int horizon_num = std::min(3, static_cast<int>(indices.size()));
+      for (int i = 0; i < horizon_num; ++i) {
+        next_positions.push_back(ed_->points_[indices[i]]);
+        next_yaws.push_back(ed_->yaws_[indices[i]]);
+      }
     }
   } else if (ed_->points_.size() == 1) {
     frontier_finder_->updateFrontierCostMatrix();
@@ -132,17 +155,74 @@ int GlobalExplorationPlanner::computeNextViewpoint(
           min_cost_id = i;
         }
       }
-      next_pos = ed_->n_points_[0][min_cost_id];
-      next_yaw = n_yaws[0][min_cost_id];
+      const Vector3d next_pos = ed_->n_points_[0][min_cost_id];
+      const double next_yaw = n_yaws[0][min_cost_id];
+      next_positions = { next_pos };
+      next_yaws = { next_yaw };
       ed_->refined_points_ = { next_pos };
       ed_->refined_views_ = { next_pos + 2.0 * Vector3d(cos(next_yaw), sin(next_yaw), 0) };
     } else {
-      next_pos = ed_->points_[0];
-      next_yaw = ed_->yaws_[0];
+      next_positions = { ed_->points_[0] };
+      next_yaws = { ed_->yaws_[0] };
     }
   } else {
     ROS_ERROR("Empty destination.");
     return FAIL;
+  }
+
+  if (next_positions.empty() || next_yaws.empty()) {
+    ROS_ERROR("Exploration planner produced empty lookahead goals.");
+    return FAIL;
+  }
+
+  double yaw_ref = yaw[0];
+  for (size_t i = 0; i < next_yaws.size(); ++i) {
+    next_yaws[i] = unwrapYawToward(yaw_ref, next_yaws[i]);
+    yaw_ref = next_yaws[i];
+  }
+
+  Vector3d safe_start = pos;
+  if (!planner_manager_->projectToValidExplorePoint(pos, safe_start, 3.0)) {
+    ROS_ERROR_STREAM("Failed to project exploration start into valid space: " << pos.transpose());
+    return FAIL;
+  }
+
+  Vector3d seg_start = safe_start;
+  for (size_t i = 0; i < next_positions.size(); ++i) {
+    Vector3d safe_goal;
+    if (!planner_manager_->projectToValidExplorePoint(next_positions[i], safe_goal, 3.0)) {
+      ROS_ERROR_STREAM("Failed to project exploration goal into valid space: "
+                       << next_positions[i].transpose());
+      return FAIL;
+    }
+
+    planner_manager_->path_finder_->reset();
+    if (planner_manager_->path_finder_->search(seg_start, safe_goal) != Astar::REACH_END) {
+      ROS_ERROR_STREAM("Failed to build path segment from " << seg_start.transpose() << " to "
+                       << safe_goal.transpose());
+      return FAIL;
+    }
+
+    vector<Vector3d> safe_path;
+    if (!planner_manager_->sanitizeExplorePath(planner_manager_->path_finder_->getPath(), safe_path)) {
+      ROS_ERROR_STREAM("Failed to sanitize path segment to viewpoint " << i);
+      return FAIL;
+    }
+
+    PathSegmentWithYaw segment;
+    segment.path = safe_path;
+    segment.viewpoint = safe_goal;
+    segment.yaw = next_yaws[i];
+    path_segments.push_back(segment);
+
+    seg_start = safe_goal;
+    ed_->lookahead_goals_.push_back(safe_goal);
+    ed_->lookahead_yaws_.push_back(next_yaws[i]);
+  }
+
+  ed_->lookahead_path_segments_ = path_segments;
+  if (!path_segments.empty()) {
+    ed_->next_goal_ = path_segments.front().viewpoint;
   }
 
   return SUCCEED;

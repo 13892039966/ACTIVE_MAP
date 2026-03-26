@@ -136,6 +136,7 @@ struct PlanParameters {
   double minco_anchor_weight_ = 2.0;
   double minco_lbfgs_delta_ = 1.0e-2;
   int minco_lbfgs_max_iter_ = 200;
+  double explore_strict_horizon_ = 2.5;
   /* processing time */
   double time_search_ = 0.0;
   double time_optimize_ = 0.0;

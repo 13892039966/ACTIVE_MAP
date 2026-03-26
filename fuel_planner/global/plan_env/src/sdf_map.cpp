@@ -240,6 +240,50 @@ void SDFMap::updateESDF3d() {
   }
 }
 
+void SDFMap::carveFreeRegion(const Eigen::Vector3d& center, double radius_xy, double radius_z) {
+  if (!isInMap(center)) return;
+
+  radius_xy = std::max(radius_xy, mp_->resolution_);
+  radius_z = std::max(radius_z, mp_->resolution_);
+  Eigen::Vector3d half(radius_xy, radius_xy, radius_z);
+  Eigen::Vector3d min_pos = center - half;
+  Eigen::Vector3d max_pos = center + half;
+  boundBox(min_pos, max_pos);
+
+  Eigen::Vector3i min_id, max_id;
+  posToIndex(min_pos, min_id);
+  posToIndex(max_pos, max_id);
+  boundIndex(min_id);
+  boundIndex(max_id);
+
+  const double radius_xy_sq = radius_xy * radius_xy;
+  const double radius_z_sq = radius_z * radius_z;
+  for (int x = min_id(0); x <= max_id(0); ++x)
+    for (int y = min_id(1); y <= max_id(1); ++y)
+      for (int z = min_id(2); z <= max_id(2); ++z) {
+        Eigen::Vector3d pos;
+        indexToPos(Eigen::Vector3i(x, y, z), pos);
+        const Eigen::Vector3d d = pos - center;
+        const double ellipse = (d.x() * d.x() + d.y() * d.y()) / radius_xy_sq +
+                               (d.z() * d.z()) / radius_z_sq;
+        if (ellipse > 1.0) continue;
+
+        const int adr = toAddress(x, y, z);
+        md_->occupancy_buffer_[adr] = mp_->clamp_min_log_;
+        md_->occupancy_buffer_inflate_[adr] = 0;
+      }
+
+  md_->local_bound_min_ = min_id;
+  md_->local_bound_max_ = max_id;
+  mr_->local_updated_ = true;
+  md_->update_min_ = min_pos;
+  md_->update_max_ = max_pos;
+  md_->reset_updated_box_ = false;
+
+  clearAndInflateLocalMap();
+  updateESDF3d();
+}
+
 void SDFMap::setCacheOccupancy(const int& adr, const int& occ) {
   if (adr < 0 || adr >= static_cast<int>(md_->count_hit_.size())) return;
 
