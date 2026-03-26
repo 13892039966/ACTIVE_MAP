@@ -3,6 +3,7 @@
     <arg name="frontend_decimation" default="2"/>
     <arg name="frontend_voxel_size" default="0.05"/>
     <arg name="frontend_max_depth" default="15.0"/>
+    <arg name="enable_teleop" default="false"/>
 
 
     <!-- Backend pre-filter params -->
@@ -25,11 +26,20 @@
     <arg name="publish_freq" default="10.0"/>
     <arg name="max_queue_size" default="3"/>
     <arg name="publish_only_on_update" default="true"/>
+    <arg name="save_images" default="true"/>
+    <arg name="image_save_period" default="0.5"/>
+    <arg name="image_output_dir" default="/home/hmq/ACTIVE_MAP/output/airsim_rgb_frames"/>
 
 
 
     <node pkg="active_mapping" type="airsim_frontend.py" name="airsim_frontend" output="screen">
         <param name="max_valid_depth" value="$(arg frontend_max_depth)"/>
+    </node>
+
+    <node if="$(arg save_images)" pkg="active_mapping" type="airsim_image_saver.py" name="airsim_image_saver" output="screen">
+        <param name="image_topic" value="/airsim/rgb"/>
+        <param name="save_period" value="$(arg image_save_period)"/>
+        <param name="output_dir" value="$(arg image_output_dir)"/>
     </node>
 
     <node pkg="nodelet" type="nodelet" name="vision_nodelet_manager" args="manager" output="screen"/>
@@ -42,7 +52,7 @@
         <remap from="depth_registered/points"     to="/airsim/point_cloud"/>
     </node>
 
-    <node pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
+    <node if="$(arg enable_teleop)" pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />
 
 
     <node pkg="active_mapping" type="active_mapping_node" name="active_mapping_backend" output="screen">

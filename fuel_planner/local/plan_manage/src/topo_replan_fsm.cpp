@@ -333,6 +333,7 @@ void TopoReplanFSM::frontierCallback(const ros::TimerEvent& e) {
 }
 
 bool TopoReplanFSM::callSearchAndOptimization() {
+  return callTopologicalTraj(1);
 }
 
 bool TopoReplanFSM::callTopologicalTraj(int step) {

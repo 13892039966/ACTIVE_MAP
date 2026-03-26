@@ -414,6 +414,9 @@ void Controller::update(
 	std::string constraint_info("");
   	Eigen::Vector3d drag_accelerations = Eigen::Vector3d::Zero();
   	Controller_Output_t reference_inputs;
+	reference_inputs.roll_rate = 0.0;
+	reference_inputs.pitch_rate = 0.0;
+	reference_inputs.yaw_rate = 0.0;
   	if (param.perform_aerodynamics_compensation) {
     // Compute reference inputs that compensate for aerodynamic drag
     // computeAeroCompensatedReferenceInputs(reference_state, state_estimate,
@@ -446,9 +449,15 @@ void Controller::update(
 	Matrix3d wRc = rotz(yaw_curr);
 	Matrix3d cRw = wRc.transpose();
 	e_p = des.p - odom.p;
+	uav_utils::limit_range(e_p(0), param.pxy_error_max);
+	uav_utils::limit_range(e_p(1), param.pxy_error_max);
+	uav_utils::limit_range(e_p(2), param.pz_error_max);
 	Eigen::Vector3d u_p = wRc * Kp * cRw * e_p;
 	u.des_v_real = des.v + u_p; // For estimating hover percent
 	e_v = des.v + u_p - odom.v;
+	uav_utils::limit_range(e_v(0), param.vxy_error_max);
+	uav_utils::limit_range(e_v(1), param.vxy_error_max);
+	uav_utils::limit_range(e_v(2), param.vz_error_max);
 
 	const std::vector<double> integration_enable_limits = {0.1, 0.1, 0.1};
 	for (size_t k = 0; k < 3; ++k) {
@@ -469,10 +478,12 @@ void Controller::update(
 	e_yaw = yaw_des - yaw_curr;
 	while(e_yaw > M_PI) e_yaw -= (2 * M_PI);
 	while(e_yaw < -M_PI) e_yaw += (2 * M_PI);
+	uav_utils::limit_range(e_yaw, param.yaw_error_max);
 	double u_yaw = Kyaw * e_yaw;
 	F_des = u_v * param.mass + 
 		Vector3d(0, 0, param.mass * param.gra) + Ka * param.mass * des.a;
 	F_des -= drag_accelerations*param.mass;
+	const Eigen::Vector3d F_des_raw = F_des;
 	
 
 
@@ -485,42 +496,38 @@ void Controller::update(
     //                             pow(state_estimate.velocity.y(), 2.0));
 	//hzchzc
   	}
-	// if (F_des(2) < 0.4 * param.mass * param.gra)
-	// {
-	// 	ROS_WARN("Low thrust");
-	// 	constraint_info = boost::str(
-	// 		boost::format("thrust too low F_des(2)=%.3f; ")% F_des(2));
-	// 	F_des = F_des / F_des(2) * (0.4 * param.mass * param.gra);
-	// }
-	// else if (F_des(2) > 2.5 * param.mass * param.gra)
-	// {
-	// 	// cout<<"bbbbbbbbbbbbbb";
-	// 	ROS_WARN("full thrust");
-	// 	constraint_info = boost::str(
-	// 		boost::format("thrust too high F_des(2)=%.3f; ")% F_des(2));
-	// 	F_des = F_des / F_des(2) * (2.5 * param.mass * param.gra);
-	// }
-	// double limit_angle = 60.0;
-	// if (std::fabs(F_des(0)/F_des(2)) > std::tan(toRad(limit_angle)))
-	// {
-	// 	// cout<<"cccccccccccccccc";
-	// 	ROS_WARN("tilt!");
-	// 	constraint_info += boost::str(boost::format("x(%f) too tilt; ")
-	// 		% toDeg(std::atan2(F_des(0),F_des(2))));
-	// 	F_des(0) = F_des(0)/std::fabs(F_des(0)) * F_des(2) * std::tan(toRad(limit_angle));
-	// }
+	const double min_thrust_z = 0.4 * param.mass * param.gra;
+	const double max_thrust_z = 2.5 * param.mass * param.gra;
+	if (F_des(2) < min_thrust_z) {
+		constraint_info += boost::str(
+			boost::format("thrust_z low %.3f->%.3f; ") % F_des(2) % min_thrust_z);
+		if (std::fabs(F_des(2)) > 1e-6) {
+			F_des *= min_thrust_z / F_des(2);
+		} else {
+			F_des = Vector3d(0.0, 0.0, min_thrust_z);
+		}
+	}
+	else if (F_des(2) > max_thrust_z) {
+		constraint_info += boost::str(
+			boost::format("thrust_z high %.3f->%.3f; ") % F_des(2) % max_thrust_z);
+		F_des *= max_thrust_z / F_des(2);
+	}
 
-	// if (std::fabs(F_des(1)/F_des(2)) > std::tan(toRad(limit_angle)))
-	// {
-	// 	ROS_WARN("tilt!");
-	// 	constraint_info += boost::str(boost::format("y(%f) too tilt; ")
-	// 		% toDeg(std::atan2(F_des(1),F_des(2))));
-	// 	F_des(1) = F_des(1)/std::fabs(F_des(1)) * F_des(2) * std::tan(toRad(limit_angle));	
-	// }
+	const double limit_angle = 50.0;
+	const double max_xy = std::max(1e-3, std::fabs(F_des(2)) * std::tan(toRad(limit_angle)));
+	const double cur_xy = F_des.head<2>().norm();
+	if (cur_xy > max_xy) {
+		constraint_info += boost::str(
+			boost::format("tilt %.2fdeg limited to %.2fdeg; ")
+			% toDeg(std::atan2(cur_xy, std::fabs(F_des(2)))) % limit_angle);
+		F_des.head<2>() *= max_xy / cur_xy;
+	}
 	Matrix3d wRb_odom = odom.q.toRotationMatrix();
 	Vector3d z_b_curr = wRb_odom.col(2);
 	double u1 = F_des.dot(z_b_curr);
 	u.thrust = u1 / param.full_thrust;
+	uav_utils::limit_range(u.thrust, 1.0);
+	if (u.thrust < 0.0) u.thrust = 0.0;
 
 
 
@@ -534,6 +541,9 @@ void Controller::update(
 	// }
 	const Eigen::Quaterniond desired_attitude = computeDesiredAttitude(F_des/param.mass, des.yaw,odom.q);
 	const Eigen::Vector3d feedback_bodyrates = computeFeedBackControlBodyrates(desired_attitude,odom.q);
+	if (!std::isfinite(reference_inputs.yaw_rate)) {
+		reference_inputs.yaw_rate = u_yaw;
+	}
 	u.roll_rate = reference_inputs.roll_rate+feedback_bodyrates.x();
 	u.pitch_rate = reference_inputs.pitch_rate+feedback_bodyrates.y();
 	u.yaw_rate = reference_inputs.yaw_rate+feedback_bodyrates.z();
@@ -556,13 +566,17 @@ void Controller::update(
 
 	ROS_WARN_THROTTLE(
 		0.5,
-		"[px4ctrl ctrl] F_des=(%.2f %.2f %.2f) thrust=%.3f bodyrate_cmd=(%.3f %.3f %.3f) "
+		"[px4ctrl ctrl] F_raw=(%.2f %.2f %.2f) F_lim=(%.2f %.2f %.2f) thrust=%.3f bodyrate_cmd=(%.3f %.3f %.3f) "
 		"ref_bodyrate=(%.3f %.3f %.3f) fb_bodyrate=(%.3f %.3f %.3f)",
+		F_des_raw.x(), F_des_raw.y(), F_des_raw.z(),
 		F_des.x(), F_des.y(), F_des.z(),
 		u.thrust,
 		u.roll_rate, u.pitch_rate, u.yaw_rate,
 		reference_inputs.roll_rate, reference_inputs.pitch_rate, reference_inputs.yaw_rate,
 		feedback_bodyrates.x(), feedback_bodyrates.y(), feedback_bodyrates.z());
+	if (!constraint_info.empty()) {
+		ROS_WARN_THROTTLE(0.5, "[px4ctrl ctrl] constraints: %s", constraint_info.c_str());
+	}
 
 	// printf("roll_rate: %f \n",u.roll_rate);
 	// printf("pitch_rate: %f \n",u.pitch_rate);

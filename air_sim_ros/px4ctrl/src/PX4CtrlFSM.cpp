@@ -113,11 +113,22 @@ void PX4CtrlFSM::process()
 	// }
 
 
-	
-	controller.config_gain(param.track_gain);
-	process_cmd_control(u, u_so3);
-	// align_with_imu(u);
-	// u.yaw = cmd_data.yaw;
+	if (!odom_is_received(now_time) || !imu_is_received(now_time)) {
+		ROS_WARN_THROTTLE(1.0, "[px4ctrl] Skip control: odom/imu timeout.");
+		controller.publish_zero_ctrl(now_time);
+		return;
+	}
+
+	if (!cmd_is_received(now_time)) {
+		controller.config_gain(param.hover_gain);
+		set_hov_with_odom();
+		process_hover_control(u, u_so3);
+		ROS_WARN_THROTTLE(1.0, "[px4ctrl] Command timeout. Holding hover.");
+	} else {
+		controller.config_gain(param.track_gain);
+		process_cmd_control(u, u_so3);
+	}
+
 	controller.publish_ctrl(u, now_time);
 	hov_thr_kf.simple_update(u.des_v_real, odom_data.v );
 	// This line may not take effect according to param.hov.use_hov_percent_kf

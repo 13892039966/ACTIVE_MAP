@@ -16,14 +16,14 @@
     <arg name="init_x" default="0.0"/>
     <arg name="init_y" default="0.0"/>
     <arg name="init_z" default="0.0"/>
-    <arg name="max_vel" default="1.0"/>
+    <arg name="max_vel" default="2.0"/>
     <arg name="max_acc" default="1.0"/>
-    <arg name="frontier_min_candidate_dist" default="0.4"/>
-    <arg name="frontier_min_candidate_clearance" default="0.35"/>
+    <arg name="frontier_min_candidate_dist" default="0.8"/>
+    <arg name="frontier_min_candidate_clearance" default="0.6"/>
     <arg name="frontier_candidate_dphi_deg" default="10.0"/>
     <arg name="frontier_candidate_rnum" default="5"/>
-    <arg name="frontier_candidate_rmin" default="0.8"/>
-    <arg name="frontier_candidate_rmax" default="1.4"/>
+    <arg name="frontier_candidate_rmin" default="1.2"/>
+    <arg name="frontier_candidate_rmax" default="2.0"/>
     <arg name="show_viewpoints" default="false"/>
     <arg name="show_trajectory" default="true"/>
     <arg name="show_next_goal" default="true"/>

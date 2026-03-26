@@ -35,6 +35,7 @@ include_directories(
   include
   SYSTEM
   ${catkin_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/../../global/exploration_manager/include
   ${EIGEN3_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
 )

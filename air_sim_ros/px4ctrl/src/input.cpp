@@ -1,4 +1,5 @@
 #include "input.h"
+#include <cmath>
 #include <uav_utils/converters.h>
 RC_Data_t::RC_Data_t() {
     rcv_stamp = ros::Time(0);
@@ -119,6 +120,8 @@ void Command_Data_t::feed(quadrotor_msgs::PositionCommandConstPtr pMsg) {
 
     static double last_time;
     static double last_yaw;
+    static constexpr double kMaxReasonableHeadRate = 2.0;
+    static constexpr double kMaxMsgDiffTolerance = 0.8;
     double now_time;
 
     msg = *pMsg;
@@ -173,10 +176,17 @@ void Command_Data_t::feed(quadrotor_msgs::PositionCommandConstPtr pMsg) {
         else if (dist < -M_PI)
             angle2 = angle2 - TwoPi;
         diff_yaw = (angle1-angle2);
-        diff_time = 0.01;//hzchzc
-        head_rate = diff_yaw/diff_time;
-        uav_utils::limit_range(head_rate,1.0);     
-        // printf("angle1: %f, angle2: %f, head_rate: %f \n, diff_time: %f",angle1,angle2,head_rate,diff_time);
+        const double safe_dt = std::max(1e-4, diff_time);
+        const double diff_head_rate = diff_yaw / safe_dt;
+        const bool use_msg_yaw_dot = std::isfinite(msg.yaw_dot) &&
+                                     std::fabs(msg.yaw_dot) <= kMaxReasonableHeadRate &&
+                                     std::fabs(msg.yaw_dot - diff_head_rate) <= kMaxMsgDiffTolerance;
+        head_rate = use_msg_yaw_dot ? msg.yaw_dot : diff_head_rate;
+        uav_utils::limit_range(head_rate, kMaxReasonableHeadRate);
+        ROS_WARN_THROTTLE(0.5,
+                          "[px4ctrl input] yaw=%.3f yaw_dot_msg=%.3f yaw_dot_diff=%.3f dt=%.4f using=%s final=%.3f",
+                          yaw, msg.yaw_dot, diff_head_rate, safe_dt,
+                          use_msg_yaw_dot ? "msg" : "diff", head_rate);
     }
     cmd_init = true;
 }

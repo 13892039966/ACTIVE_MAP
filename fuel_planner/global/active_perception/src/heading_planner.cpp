@@ -272,7 +272,7 @@ double HeadingPlanner::calcInformationGain(const Eigen::Vector3d& pt, const doub
         if (!(x % factor == 0 && y % factor == 0 && z % factor == 0)) continue;
         // check visibility of unknown cells in FOV, 1: accessible, 2: blocked
         pt_idx << x, y, z;
-        if (!sdf_map_->getOccupancy(pt_idx) == SDFMap::UNKNOWN) continue;
+        if (sdf_map_->getOccupancy(pt_idx) != SDFMap::UNKNOWN) continue;
         if (!sdf_map_->isInBox(pt_idx)) continue;
         sdf_map_->indexToPos(pt_idx, check_pt);
         if (!insideFoV(check_pt, pt, normals)) continue;
@@ -359,7 +359,7 @@ double HeadingPlanner::calcInfoGain(const Eigen::Vector3d& pt, const double& yaw
         if (!(x % factor == 0 && y % factor == 0 && z % factor == 0)) continue;
         // check visibility of unknown cells in FOV, 1: accessible, 2: blocked
         pt_idx << x, y, z;
-        if (!sdf_map_->getOccupancy(pt_idx) == SDFMap::UNKNOWN) continue;
+        if (sdf_map_->getOccupancy(pt_idx) != SDFMap::UNKNOWN) continue;
         sdf_map_->indexToPos(pt_idx, check_pt);
         if (!insideFoV(check_pt, pt, normals)) continue;
 

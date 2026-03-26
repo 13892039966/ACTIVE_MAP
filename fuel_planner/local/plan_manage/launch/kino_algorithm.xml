@@ -73,7 +73,7 @@
     <param name="sdf_map/min_ray_length" value="0.5"/>
     <param name="sdf_map/max_ray_length" value="4.5"/>
     <param name="sdf_map/virtual_ceil_height"   value="3.2"/>
-    <param name="sdf_map/optimistic" value="true" type="bool"/>
+    <param name="sdf_map/optimistic" value="false" type="bool"/>
     <param name="sdf_map/signed_dist" value="false" type="bool"/>
 
     <param name="map_ros/cx" value="$(arg cx)"/>

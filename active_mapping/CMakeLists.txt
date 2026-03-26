@@ -46,6 +46,7 @@ target_link_libraries(heatmap_cluster_node
 
 catkin_install_python(PROGRAMS
   scripts/airsim_frontend.py
+  scripts/airsim_image_saver.py
   scripts/external_pose_tf_broadcaster.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
