@@ -12,6 +12,13 @@
 	<arg name="save_images" default="true" />
 	<arg name="image_save_period" default="0.5" />
 	<arg name="image_output_dir" default="/home/hmq/ACTIVE_MAP/output/airsim_rgb_frames" />
+	<arg name="write_airsim_settings" default="true" />
+	<arg name="airsim_settings_path" default="$(env HOME)/Documents/AirSim/settings.json" />
+	<arg name="vehicle_name" default="drone_1" />
+	<arg name="vehicle_spawn_x" default="0.0" />
+	<arg name="vehicle_spawn_y" default="0.0" />
+	<arg name="vehicle_spawn_z" default="-1.0" />
+	<arg name="vehicle_spawn_yaw_deg" default="0.0" />
 
 	<arg name="map_size_x" value="100.0" />
     <arg name="map_size_y" value="20.0" />
@@ -30,7 +37,15 @@
 		      name="activegs_env"
 		      output="$(arg output)"
 		      required="true"
-		      args="$(arg env_root) $(arg scene_map) $(arg env_extra_args)" />
+		      args="'$(arg env_root)' '$(arg scene_map)' $(arg env_extra_args)">
+			<env name="AIRSIM_WRITE_SETTINGS" value="$(arg write_airsim_settings)" />
+			<env name="AIRSIM_SETTINGS_PATH" value="$(arg airsim_settings_path)" />
+			<env name="AIRSIM_VEHICLE_NAME" value="$(arg vehicle_name)" />
+			<env name="AIRSIM_VEHICLE_SPAWN_X" value="$(arg vehicle_spawn_x)" />
+			<env name="AIRSIM_VEHICLE_SPAWN_Y" value="$(arg vehicle_spawn_y)" />
+			<env name="AIRSIM_VEHICLE_SPAWN_Z" value="$(arg vehicle_spawn_z)" />
+			<env name="AIRSIM_VEHICLE_SPAWN_YAW_DEG" value="$(arg vehicle_spawn_yaw_deg)" />
+		      </node>
 	</group>
 
 	<node name="airsim_node"

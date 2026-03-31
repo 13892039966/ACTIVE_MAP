@@ -1,32 +1,11 @@
-NAME : single.3242.tour
-COMMENT : Length = 3242
-COMMENT : Found by LKH [Keld Helsgaun] Thu Mar 26 19:04:53 2026
+NAME : single.398.tour
+COMMENT : Length = 398
+COMMENT : Found by LKH [Keld Helsgaun] Thu Mar 26 20:06:38 2026
 TYPE : TOUR
-DIMENSION : 24
+DIMENSION : 3
 TOUR_SECTION
 1
-20
-21
-23
-22
-24
-18
-19
-4
 3
-9
-8
-7
-6
-13
 2
-5
-11
-10
-12
-14
-15
-16
-17
 -1
 EOF

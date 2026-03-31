@@ -1,0 +1,40 @@
+<launch>
+  <arg name="output" default="screen"/>
+  <arg name="publish_clock" default="false"/>
+  <arg name="host" default="127.0.0.1" />
+  <arg name="start_env" default="true" />
+  <arg name="startup_delay_sec" default="4" />
+  <arg name="takeoff_height" default="1.0" />
+  <arg name="enable_teleop" default="false" />
+  <arg name="save_images" default="true" />
+  <arg name="image_save_period" default="0.5" />
+  <arg name="image_output_dir" default="/home/hmq/ACTIVE_MAP/output/airsim_rgb_frames" />
+
+  <arg name="env_root" default="/home/hmq/airsim_package_scene/Hospital/LinuxNoEditor" />
+  <arg name="scene_map" default="" />
+  <arg name="env_extra_args" default="-windowed -ResX=1280 -ResY=720" />
+  <arg name="vehicle_spawn_x" default="0.0" />
+  <arg name="vehicle_spawn_y" default="0.0" />
+  <arg name="vehicle_spawn_z" default="-1.0" />
+  <arg name="vehicle_spawn_yaw_deg" default="0.0" />
+
+  <include file="$(find airsim_ros_pkgs)/launch/airsim_node.launch">
+    <arg name="output" value="$(arg output)" />
+    <arg name="publish_clock" value="$(arg publish_clock)" />
+    <arg name="host" value="$(arg host)" />
+    <arg name="start_env" value="$(arg start_env)" />
+    <arg name="env_root" value="$(arg env_root)" />
+    <arg name="scene_map" value="$(arg scene_map)" />
+    <arg name="env_extra_args" value="$(arg env_extra_args)" />
+    <arg name="vehicle_spawn_x" value="$(arg vehicle_spawn_x)" />
+    <arg name="vehicle_spawn_y" value="$(arg vehicle_spawn_y)" />
+    <arg name="vehicle_spawn_z" value="$(arg vehicle_spawn_z)" />
+    <arg name="vehicle_spawn_yaw_deg" value="$(arg vehicle_spawn_yaw_deg)" />
+    <arg name="startup_delay_sec" value="$(arg startup_delay_sec)" />
+    <arg name="takeoff_height" value="$(arg takeoff_height)" />
+    <arg name="enable_teleop" value="$(arg enable_teleop)" />
+    <arg name="save_images" value="$(arg save_images)" />
+    <arg name="image_save_period" value="$(arg image_save_period)" />
+    <arg name="image_output_dir" value="$(arg image_output_dir)" />
+  </include>
+</launch>

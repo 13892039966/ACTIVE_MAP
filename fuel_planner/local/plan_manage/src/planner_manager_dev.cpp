@@ -251,7 +251,7 @@ bool FastPlannerManager::localExplore(Eigen::Vector3d start, Eigen::Vector3d sta
   // Search astar path and use it as initial value
   path_finder_->reset();
   int status = path_finder_->search(start, gi);
-  if (status == Astar::NO_PATH) {
+  if (status == BubbleAstar::NO_PATH) {
     return false;
   }
   auto path = path_finder_->getPath();

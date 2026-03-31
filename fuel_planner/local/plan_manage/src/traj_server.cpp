@@ -35,6 +35,17 @@ int pub_traj_id_;
 bool use_poly_traj_ = false;
 bool receive_poly_yaw_ = false;
 bool use_minco_traj_ = false;
+vector<NonUniformBspline> pending_traj_;
+PolynomialTraj pending_poly_pos_traj_, pending_poly_yaw_traj_;
+std::shared_ptr<Trajectory<7>> pending_minco_pos_traj_;
+std::shared_ptr<Trajectory<5>> pending_minco_yaw_traj_;
+double pending_traj_duration_ = 0.0;
+ros::Time pending_start_time_;
+int pending_traj_id_ = -1;
+bool has_pending_traj_ = false;
+bool pending_receive_poly_yaw_ = false;
+bool pending_use_poly_traj_ = false;
+bool pending_use_minco_traj_ = false;
 
 shared_ptr<PerceptionUtils> percep_utils_;
 
@@ -61,6 +72,57 @@ double energy;
 Eigen::Matrix3d R_loop;
 Eigen::Vector3d T_loop;
 bool isLoopCorrection = false;
+
+namespace {
+constexpr double kPendingStartEps = 1e-3;
+}
+
+void noteFlightStartIfNeeded() {
+  if (start_time.isZero()) {
+    ROS_WARN("start flight");
+    start_time = ros::Time::now();
+  }
+}
+
+void clearPendingTraj() {
+  pending_traj_.clear();
+  pending_poly_pos_traj_.reset();
+  pending_poly_yaw_traj_.reset();
+  pending_minco_pos_traj_.reset();
+  pending_minco_yaw_traj_.reset();
+  pending_traj_duration_ = 0.0;
+  pending_start_time_ = ros::Time(0);
+  pending_traj_id_ = -1;
+  has_pending_traj_ = false;
+  pending_receive_poly_yaw_ = false;
+  pending_use_poly_traj_ = false;
+  pending_use_minco_traj_ = false;
+}
+
+bool shouldQueuePendingTraj(const ros::Time& traj_start_time) {
+  return traj_start_time > ros::Time::now() + ros::Duration(kPendingStartEps);
+}
+
+void activatePendingTraj() {
+  if (!has_pending_traj_) return;
+
+  traj_ = pending_traj_;
+  poly_pos_traj_ = pending_poly_pos_traj_;
+  poly_yaw_traj_ = pending_poly_yaw_traj_;
+  minco_pos_traj_ = pending_minco_pos_traj_;
+  minco_yaw_traj_ = pending_minco_yaw_traj_;
+  traj_duration_ = pending_traj_duration_;
+  start_time_ = pending_start_time_;
+  traj_id_ = pending_traj_id_;
+  receive_traj_ = true;
+  use_poly_traj_ = pending_use_poly_traj_;
+  receive_poly_yaw_ = pending_receive_poly_yaw_;
+  use_minco_traj_ = pending_use_minco_traj_;
+
+  clearPendingTraj();
+  noteFlightStartIfNeeded();
+  ROS_INFO_STREAM("[traj_server] activate pending trajectory id=" << traj_id_);
+}
 
 double calcPathLength(const vector<Eigen::Vector3d>& path) {
   if (path.empty()) return 0;
@@ -251,7 +313,8 @@ void visCallback(const ros::TimerEvent& e) {
 
 void bsplineCallback(const bspline::BsplineConstPtr& msg) {
   // Received traj should have ascending traj_id
-  if (msg->traj_id <= traj_id_) {
+  const int latest_traj_id = has_pending_traj_ ? std::max(traj_id_, pending_traj_id_) : traj_id_;
+  if (msg->traj_id <= latest_traj_id) {
     ROS_ERROR("out of order bspline.");
     return;
   }
@@ -274,31 +337,54 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
   for (int i = 0; i < msg->yaw_pts.size(); ++i)
     yaw_pts(i, 0) = msg->yaw_pts[i];
   NonUniformBspline yaw_traj(yaw_pts, 3, msg->yaw_dt);
+  vector<NonUniformBspline> parsed_traj;
+  parsed_traj.push_back(pos_traj);
+  parsed_traj.push_back(parsed_traj[0].getDerivative());
+  parsed_traj.push_back(parsed_traj[1].getDerivative());
+  parsed_traj.push_back(yaw_traj);
+  parsed_traj.push_back(yaw_traj.getDerivative());
+  parsed_traj.push_back(parsed_traj[2].getDerivative());
+  const double parsed_duration = parsed_traj[0].getTimeSum();
+
+  if (shouldQueuePendingTraj(msg->start_time)) {
+    pending_traj_ = parsed_traj;
+    pending_start_time_ = msg->start_time;
+    pending_traj_id_ = msg->traj_id;
+    pending_traj_duration_ = parsed_duration;
+    pending_use_poly_traj_ = false;
+    pending_use_minco_traj_ = false;
+    pending_receive_poly_yaw_ = true;
+    pending_poly_pos_traj_.reset();
+    pending_poly_yaw_traj_.reset();
+    pending_minco_pos_traj_.reset();
+    pending_minco_yaw_traj_.reset();
+    has_pending_traj_ = true;
+    ROS_INFO_STREAM("[traj_server] queued pending bspline id=" << pending_traj_id_
+                    << " start_in=" << (pending_start_time_ - ros::Time::now()).toSec());
+    return;
+  }
+
+  clearPendingTraj();
   start_time_ = msg->start_time;
   traj_id_ = msg->traj_id;
-
-  traj_.clear();
-  traj_.push_back(pos_traj);
-  traj_.push_back(traj_[0].getDerivative());
-  traj_.push_back(traj_[1].getDerivative());
-  traj_.push_back(yaw_traj);
-  traj_.push_back(yaw_traj.getDerivative());
-  traj_.push_back(traj_[2].getDerivative());
-  traj_duration_ = traj_[0].getTimeSum();
+  traj_ = parsed_traj;
+  traj_duration_ = parsed_duration;
 
   receive_traj_ = true;
   use_poly_traj_ = false;
   receive_poly_yaw_ = true;
-
-  // Record the start time of flight
-  if (start_time.isZero()) {
-    ROS_WARN("start flight");
-    start_time = ros::Time::now();
-  }
-
+  use_minco_traj_ = false;
+  noteFlightStartIfNeeded();
 }
 
 void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
+  const int latest_traj_id = has_pending_traj_ ? std::max(traj_id_, pending_traj_id_) : traj_id_;
+  if (msg->traj_id <= latest_traj_id) {
+    ROS_ERROR("[traj_server] out of order poly traj.");
+    return;
+  }
+
+  const bool queue_pending = shouldQueuePendingTraj(msg->start_time);
   if (msg->order == 7) {
     if (msg->duration.size() * 8 != msg->coef_x.size() || msg->coef_x.size() != msg->coef_y.size() ||
         msg->coef_x.size() != msg->coef_z.size()) {
@@ -320,10 +406,31 @@ void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
           msg->coef_z[offset + 3], msg->coef_z[offset + 4], msg->coef_z[offset + 5],
           msg->coef_z[offset + 6], msg->coef_z[offset + 7];
     }
-    minco_pos_traj_.reset(new Trajectory<7>(dura, c_mats));
+    auto parsed_traj = std::make_shared<Trajectory<7>>(dura, c_mats);
+    const double parsed_duration = parsed_traj->getTotalDuration();
+    if (queue_pending) {
+      pending_minco_pos_traj_ = parsed_traj;
+      pending_poly_pos_traj_.reset();
+      pending_traj_.clear();
+      pending_start_time_ = msg->start_time;
+      pending_traj_id_ = msg->traj_id;
+      pending_traj_duration_ = parsed_duration;
+      pending_use_poly_traj_ = false;
+      pending_use_minco_traj_ = true;
+      pending_receive_poly_yaw_ = false;
+      pending_poly_yaw_traj_.reset();
+      pending_minco_yaw_traj_.reset();
+      has_pending_traj_ = true;
+      ROS_INFO_STREAM("[traj_server] queued pending MINCO traj id=" << pending_traj_id_
+                      << " start_in=" << (pending_start_time_ - ros::Time::now()).toSec());
+      return;
+    }
+
+    clearPendingTraj();
+    minco_pos_traj_ = parsed_traj;
     start_time_ = msg->start_time;
     traj_id_ = msg->traj_id;
-    traj_duration_ = minco_pos_traj_->getTotalDuration();
+    traj_duration_ = parsed_duration;
     receive_traj_ = true;
     use_poly_traj_ = false;
     use_minco_traj_ = true;
@@ -335,7 +442,7 @@ void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
       return;
     }
 
-    poly_pos_traj_.reset();
+    PolynomialTraj parsed_poly_traj;
     for (size_t i = 0; i < msg->duration.size(); ++i) {
       const int offset = static_cast<int>(i) * 6;
       Polynomial::Vector6d cx, cy, cz;
@@ -344,12 +451,33 @@ void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
         cy(j) = msg->coef_y[offset + j];
         cz(j) = msg->coef_z[offset + j];
       }
-      poly_pos_traj_.addSegment(Polynomial(cx, cy, cz, msg->duration[i]));
+      parsed_poly_traj.addSegment(Polynomial(cx, cy, cz, msg->duration[i]));
+    }
+    const double parsed_duration = parsed_poly_traj.getTotalTime();
+
+    if (queue_pending) {
+      pending_poly_pos_traj_ = parsed_poly_traj;
+      pending_minco_pos_traj_.reset();
+      pending_traj_.clear();
+      pending_start_time_ = msg->start_time;
+      pending_traj_id_ = msg->traj_id;
+      pending_traj_duration_ = parsed_duration;
+      pending_use_poly_traj_ = true;
+      pending_use_minco_traj_ = false;
+      pending_receive_poly_yaw_ = false;
+      pending_poly_yaw_traj_.reset();
+      pending_minco_yaw_traj_.reset();
+      has_pending_traj_ = true;
+      ROS_INFO_STREAM("[traj_server] queued pending polynomial traj id=" << pending_traj_id_
+                      << " start_in=" << (pending_start_time_ - ros::Time::now()).toSec());
+      return;
     }
 
+    clearPendingTraj();
+    poly_pos_traj_ = parsed_poly_traj;
     start_time_ = msg->start_time;
     traj_id_ = msg->traj_id;
-    traj_duration_ = poly_pos_traj_.getTotalTime();
+    traj_duration_ = parsed_duration;
     receive_traj_ = true;
     use_poly_traj_ = true;
     use_minco_traj_ = false;
@@ -358,12 +486,7 @@ void polyTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
     ROS_ERROR("[traj_server] Unsupported PolyTraj order: %u", msg->order);
     return;
   }
-
-  if (start_time.isZero()) {
-    ROS_WARN("start flight");
-    start_time = ros::Time::now();
-  }
-
+  noteFlightStartIfNeeded();
 }
 
 void polyYawTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
@@ -377,7 +500,14 @@ void polyYawTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
     return;
   }
 
-  if (use_minco_traj_) {
+  const bool update_pending = has_pending_traj_ && msg->traj_id == pending_traj_id_;
+  const bool update_active = receive_traj_ && msg->traj_id == traj_id_;
+  if (!update_pending && !update_active) {
+    ROS_WARN_STREAM("[traj_server] ignore yaw traj for unknown traj_id=" << msg->traj_id);
+    return;
+  }
+
+  if (update_pending ? pending_use_minco_traj_ : use_minco_traj_) {
     std::vector<double> dura(msg->duration.begin(), msg->duration.end());
     std::vector<Piece<5>::CoefficientMat> c_mats(dura.size());
     for (size_t i = 0; i < dura.size(); ++i) {
@@ -389,9 +519,14 @@ void polyYawTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
       c_mats[i].row(2) << msg->coef_z[offset + 0], msg->coef_z[offset + 1], msg->coef_z[offset + 2],
           msg->coef_z[offset + 3], msg->coef_z[offset + 4], msg->coef_z[offset + 5];
     }
-    minco_yaw_traj_.reset(new Trajectory<5>(dura, c_mats));
+    auto parsed_yaw = std::make_shared<Trajectory<5>>(dura, c_mats);
+    if (update_pending) {
+      pending_minco_yaw_traj_ = parsed_yaw;
+    } else {
+      minco_yaw_traj_ = parsed_yaw;
+    }
   } else {
-    poly_yaw_traj_.reset();
+    PolynomialTraj parsed_yaw_traj;
     for (size_t i = 0; i < msg->duration.size(); ++i) {
       const int offset = static_cast<int>(i) * 6;
       Polynomial::Vector6d cx, cy, cz;
@@ -400,13 +535,26 @@ void polyYawTrajCallback(const traj_utils::PolyTrajConstPtr& msg) {
         cy(j) = msg->coef_y[offset + j];
         cz(j) = msg->coef_z[offset + j];
       }
-      poly_yaw_traj_.addSegment(Polynomial(cx, cy, cz, msg->duration[i]));
+      parsed_yaw_traj.addSegment(Polynomial(cx, cy, cz, msg->duration[i]));
+    }
+    if (update_pending) {
+      pending_poly_yaw_traj_ = parsed_yaw_traj;
+    } else {
+      poly_yaw_traj_ = parsed_yaw_traj;
     }
   }
-  receive_poly_yaw_ = true;
+  if (update_pending) {
+    pending_receive_poly_yaw_ = true;
+  } else {
+    receive_poly_yaw_ = true;
+  }
 }
 
 void cmdCallback(const ros::TimerEvent& e) {
+  if (has_pending_traj_ && ros::Time::now() + ros::Duration(kPendingStartEps) >= pending_start_time_) {
+    activatePendingTraj();
+  }
+
   // No publishing before receive traj data
   if (!receive_traj_) return;
 

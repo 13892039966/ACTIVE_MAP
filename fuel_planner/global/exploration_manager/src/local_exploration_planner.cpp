@@ -47,7 +47,7 @@ Eigen::Vector3d computeThroughGoalVelocity(const std::vector<Eigen::Vector3d>& p
   if (dir_sum.squaredNorm() < 1e-6) return Eigen::Vector3d::Zero();
 
   const Eigen::Vector3d dir = dir_sum.normalized();
-  const double lookahead_len = Astar::pathLength(path);
+  const double lookahead_len = BubbleAstar::pathLength(path);
 
   const double cur_forward_speed = std::max(0.0, cur_vel.dot(dir));
   const double nominal_speed = std::max(0.6, pp.max_vel_ * 0.55);
@@ -160,7 +160,7 @@ bool LocalExplorationPlanner::sanitizePathSegments(const Vector3d& raw_start,
     planner_manager_->path_finder_->setOptimisticUnknown(false);
     const int search_status = planner_manager_->path_finder_->search(start, goal);
     planner_manager_->path_finder_->setOptimisticUnknown(prev_optimistic_unknown);
-    if (search_status != Astar::REACH_END) {
+    if (search_status != BubbleAstar::REACH_END) {
       return false;
     }
     return planner_manager_->sanitizeExplorePath(planner_manager_->path_finder_->getPath(), safe_segment);
@@ -258,7 +258,7 @@ int LocalExplorationPlanner::solveMincoBackend(
   if (planner_manager_->planExploreTrajLong(safe_segments, vel, acc, time_lb)) {
     ed_->lookahead_arrival_times_ = planner_manager_->getExploreViewpointArrivalTimes();
   } else {
-    const double lookahead_len = Astar::pathLength(stitched_path);
+    const double lookahead_len = BubbleAstar::pathLength(stitched_path);
     const bool has_followup_goal = safe_segments.size() > 1;
     const bool stop_at_goal = !has_followup_goal && lookahead_len < 1.0;
     const Eigen::Vector3d terminal_vel =
@@ -302,7 +302,7 @@ void LocalExplorationPlanner::shortenPath(vector<Vector3d>& path) const {
       std::max(1.0, 2.5 * planner_manager_->pp_.minco_safe_distance_);
   const Eigen::Vector3d path_start = path.front();
   vector<Vector3d> short_tour = { path.front() };
-  for (int i = 1; i < path.size() - 1; ++i) {
+  for (size_t i = 1; i + 1 < path.size(); ++i) {
     if ((path[i] - short_tour.back()).norm() > dist_thresh) {
       short_tour.push_back(path[i]);
     } else {

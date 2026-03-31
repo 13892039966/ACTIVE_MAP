@@ -508,10 +508,7 @@ void FastPlannerManager::initPlanModules(ros::NodeHandle& nh) {
   edt_environment_->setMap(sdf_map_);
 
   if (use_geometric_path) {
-    path_finder_.reset(new Astar);
-    // path_finder_->setParam(nh);
-    // path_finder_->setEnvironment(edt_environment_);
-    // path_finder_->init();
+    path_finder_.reset(new BubbleAstar);
     path_finder_->init(nh, edt_environment_);
   }
 
@@ -946,17 +943,30 @@ bool FastPlannerManager::setupExploreMinco(const vector<Eigen::Vector3d>& safe_t
     seg_pts.push_back(p1);
   }
 
+  Eigen::Vector3d init_pos = safe_tour.front();
   Eigen::Vector3d init_vel = cur_vel;
   Eigen::Vector3d init_acc = cur_acc;
   Eigen::Vector3d init_jerk = Eigen::Vector3d::Zero();
   Eigen::Vector3d sampled_pos, sampled_vel, sampled_acc, sampled_jerk;
   if (sampleCurrentMincoState(local_data_, sampled_pos, sampled_vel, sampled_acc, sampled_jerk) &&
       (sampled_pos - safe_tour.front()).norm() < 1.0) {
+    bool can_shift_start = isPointSafeInExploreSpace(sampled_pos, true);
+    if (can_shift_start && safe_tour.size() > 1) {
+      can_shift_start = isSegmentSafeInExploreSpace(sampled_pos, safe_tour[1], -1.0, true);
+    }
+    if (can_shift_start) {
+      init_pos = sampled_pos;
+      explore_safe_tour_.front() = init_pos;
+      explore_ref_path_points_.front() = init_pos;
+      if (!explore_ref_path_segments_.empty() && !explore_ref_path_segments_.front().empty()) {
+        explore_ref_path_segments_.front().front() = init_pos;
+      }
+    }
     init_vel = sampled_vel;
     init_acc = sampled_acc;
     init_jerk = sampled_jerk;
   }
-  explore_ini_state_ << safe_tour.front(), init_vel, init_acc, init_jerk;
+  explore_ini_state_ << init_pos, init_vel, init_acc, init_jerk;
   const Eigen::Vector3d fin_vel =
       explore_stop_at_goal_ ? Eigen::Vector3d::Zero() : explore_terminal_vel_;
   explore_fin_state_ << safe_tour.back(), fin_vel, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero();
@@ -1068,14 +1078,30 @@ bool FastPlannerManager::setupExploreLongMinco(const vector<PathSegmentWithYaw>&
     }
   }
 
-  const Eigen::Vector3d start_pos = !segments.front().path.empty() ? segments.front().path.front()
-                                                                   : segments.front().viewpoint;
+  Eigen::Vector3d start_pos = !segments.front().path.empty() ? segments.front().path.front()
+                                                             : segments.front().viewpoint;
   Eigen::Vector3d init_vel = cur_vel;
   Eigen::Vector3d init_acc = cur_acc;
   Eigen::Vector3d init_jerk = Eigen::Vector3d::Zero();
   Eigen::Vector3d sampled_pos, sampled_vel, sampled_acc, sampled_jerk;
   if (sampleCurrentMincoState(local_data_, sampled_pos, sampled_vel, sampled_acc, sampled_jerk) &&
       (sampled_pos - start_pos).norm() < 1.0) {
+    Eigen::Vector3d next_ref = segments.back().viewpoint;
+    if (total_wps > 0) {
+      next_ref = explore_long_all_wps_.col(0);
+    }
+    bool can_shift_start = isPointSafeInExploreSpace(sampled_pos, true) &&
+                           isSegmentSafeInExploreSpace(sampled_pos, next_ref, -1.0, true);
+    if (can_shift_start) {
+      start_pos = sampled_pos;
+      if (!explore_long_ref_path_points_.empty()) {
+        explore_long_ref_path_points_.front() = start_pos;
+      }
+      if (!explore_long_ref_path_segments_.empty() &&
+          !explore_long_ref_path_segments_.front().empty()) {
+        explore_long_ref_path_segments_.front().front() = start_pos;
+      }
+    }
     init_vel = sampled_vel;
     init_acc = sampled_acc;
     init_jerk = sampled_jerk;

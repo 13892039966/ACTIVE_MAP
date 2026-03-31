@@ -56,7 +56,7 @@
     <param name="sdf_map/map_size_y"   value="$(arg map_size_y_)" /> 
     <param name="sdf_map/map_size_z"   value="$(arg map_size_z_)" /> 
     <!-- <param name="sdf_map/obstacles_inflation"     value="0.099" />  -->
-    <param name="sdf_map/obstacles_inflation"     value="0.2" />
+    <param name="sdf_map/obstacles_inflation"     value="0.25" />
     <param name="sdf_map/local_bound_inflate"    value="0.8"/>
     <param name="sdf_map/local_map_margin" value="50"/>
     <param name="sdf_map/ground_height"        value="$(arg sdf_ground_height)"/>
@@ -106,6 +106,7 @@
     <!-- <param name="fsm/thresh_replan3" value="0.1" type="double"/> -->
     <param name="fsm/replan_time" value="0.200" type="double"/>
     <param name="fsm/replan_timeout" value="0.0" type="double"/>
+    <param name="fsm/emergency_stop_time" value="0.05" type="double"/>
     <param name="fsm/show_viewpoints" value="$(arg show_viewpoints)" type="bool"/>
     <param name="fsm/show_trajectory" value="$(arg show_trajectory)" type="bool"/>
     <param name="fsm/show_next_goal" value="$(arg show_next_goal)" type="bool"/>
@@ -197,6 +198,16 @@
     <param name="astar/max_search_time" value="0.001" type="double"/>
     <param name="astar/optimistic_unknown" value="true" type="bool"/>
     <param name="astar/unknown_block_radius" value="1.2" type="double"/>
+
+    <param name="bubble_astar/lambda_heu" value="1.0" type="double"/>
+    <param name="bubble_astar/resolution_astar" value="0.2" type="double"/>
+    <param name="bubble_astar/allocate_num" value="400000" type="int"/>
+    <param name="bubble_astar/max_search_time" value="1.0" type="double"/>
+    <param name="bubble_astar/safe_distance" value="0.25" type="double"/>
+    <param name="bubble_astar/min_bubble_radius" value="0.05" type="double"/>
+    <param name="bubble_astar/optimistic_unknown" value="true" type="bool"/>
+    <param name="bubble_astar/unknown_block_radius" value="1.2" type="double"/>
+    <param name="bubble_astar/debug" value="false" type="bool"/>
 
   <!-- trajectory optimization -->
     <param name="optimization/ld_smooth" value="20.0" type="double"/>

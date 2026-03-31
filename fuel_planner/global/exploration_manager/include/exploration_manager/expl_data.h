@@ -35,6 +35,7 @@ struct FSMData {
   traj_utils::PolyTraj newest_yaw_traj_;
   LocalTrajData pending_traj_;
   bool has_pending_traj_ = false;
+  bool pending_traj_published_ = false;
 };
 
 struct FSMParam {
@@ -47,6 +48,7 @@ struct FSMParam {
   double replan_min_interval_;
   double cluster_replan_min_progress_;
   double replan_timeout_;
+  double emergency_stop_time_;
   double reuse_traj_safety_grace_;
   double startup_free_radius_xy_;
   double startup_free_radius_z_;

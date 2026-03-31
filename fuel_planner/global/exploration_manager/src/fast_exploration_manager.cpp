@@ -51,7 +51,7 @@ void FastExplorationManager::initialize(ros::NodeHandle& nh) {
   nh.param("exploration/ydd", ViewNode::ydd_, -1.0);
   nh.param("exploration/w_dir", ViewNode::w_dir_, -1.0);
 
-  ViewNode::astar_.reset(new Astar);
+  ViewNode::astar_.reset(new BubbleAstar);
   ViewNode::astar_->init(nh, edt_environment_);
   ViewNode::map_ = sdf_map_;
 

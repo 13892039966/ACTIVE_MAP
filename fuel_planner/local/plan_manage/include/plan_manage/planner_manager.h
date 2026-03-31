@@ -7,7 +7,7 @@
 #include <gcopter/minco.hpp>
 #include <gcopter/trajectory.hpp>
 
-#include <path_searching/astar2.h>
+#include <path_searching/bubble_astar.h>
 #include <path_searching/kinodynamic_astar.h>
 #include <path_searching/topo_prm.h>
 
@@ -81,7 +81,7 @@ public:
   GlobalTrajData global_data_;
   MidPlanData plan_data_;
   EDTEnvironment::Ptr edt_environment_;
-  unique_ptr<Astar> path_finder_;
+  unique_ptr<BubbleAstar> path_finder_;
   unique_ptr<TopologyPRM> topo_prm_;
 
 private:

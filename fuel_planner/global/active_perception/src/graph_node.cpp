@@ -1,5 +1,5 @@
 #include <active_perception/graph_node.h>
-#include <path_searching/astar2.h>
+#include <path_searching/bubble_astar.h>
 #include <plan_env/sdf_map.h>
 #include <plan_env/raycast.h>
 
@@ -10,7 +10,7 @@ double ViewNode::am_;
 double ViewNode::yd_;
 double ViewNode::ydd_;
 double ViewNode::w_dir_;
-shared_ptr<Astar> ViewNode::astar_;
+shared_ptr<BubbleAstar> ViewNode::astar_;
 shared_ptr<RayCaster> ViewNode::caster_;
 shared_ptr<SDFMap> ViewNode::map_;
 
@@ -50,7 +50,7 @@ double ViewNode::searchPath(const Vector3d& p1, const Vector3d& p2, vector<Vecto
   for (int k = 0; k < res.size(); ++k) {
     astar_->reset();
     astar_->setResolution(res[k]);
-    if (astar_->search(p1, p2) == Astar::REACH_END) {
+    if (astar_->search(p1, p2) == BubbleAstar::REACH_END) {
       path = astar_->getPath();
       return astar_->pathLength(path);
     }

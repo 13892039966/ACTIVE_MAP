@@ -44,7 +44,7 @@ public:
 };
 
 // Node type for viewpoint refinement
-class Astar;
+class BubbleAstar;
 class SDFMap;
 class ViewNode : public BaseNode {
 public:
@@ -78,7 +78,7 @@ public:
 
   // Parameters shared among nodes
   static double vm_, am_, yd_, ydd_, w_dir_;
-  static shared_ptr<Astar> astar_;
+  static shared_ptr<BubbleAstar> astar_;
   static shared_ptr<RayCaster> caster_;
   static shared_ptr<SDFMap> map_;
 };

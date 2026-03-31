@@ -197,7 +197,7 @@ int GlobalExplorationPlanner::computeNextViewpoint(
     }
 
     planner_manager_->path_finder_->reset();
-    if (planner_manager_->path_finder_->search(seg_start, safe_goal) != Astar::REACH_END) {
+    if (planner_manager_->path_finder_->search(seg_start, safe_goal) != BubbleAstar::REACH_END) {
       ROS_ERROR_STREAM("Failed to build path segment from " << seg_start.transpose() << " to "
                        << safe_goal.transpose());
       return FAIL;
