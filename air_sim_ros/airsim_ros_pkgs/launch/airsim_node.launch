@@ -17,7 +17,7 @@
 	<arg name="vehicle_name" default="drone_1" />
 	<arg name="vehicle_spawn_x" default="0.0" />
 	<arg name="vehicle_spawn_y" default="0.0" />
-	<arg name="vehicle_spawn_z" default="-1.0" />
+	<arg name="vehicle_spawn_z" default="0.0" />
 	<arg name="vehicle_spawn_yaw_deg" default="0.0" />
 
 	<arg name="map_size_x" value="100.0" />
