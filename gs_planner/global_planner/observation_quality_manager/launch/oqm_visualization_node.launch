@@ -1,0 +1,23 @@
+<launch>
+  <!-- 启动 Observation Quality Manager 可视化节点 -->
+  <node pkg="observation_quality_manager"
+        type="oqm_node"
+        name="oqm_visualization_node"
+        output="screen">
+
+    <!-- 在私有命名空间加载全局参数配置 -->
+    <rosparam command="load" file="$(find epic_planner)/config/factory.yaml" />
+
+    <!-- 可选的 ROS 参数配置 -->
+    <param name="observation_quality/voxel_size" type="double" value="0.2" />
+
+  </node>
+
+  <!-- 启动 Python Histogram 可视化节点 -->
+  <!-- <node pkg="observation_quality_manager"
+        type="plot_histograms.py"
+        name="histogram_plotter"
+        output="screen"
+        respawn="false">
+  </node> -->
+</launch>

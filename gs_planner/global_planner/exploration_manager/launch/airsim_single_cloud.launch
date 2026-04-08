@@ -1,0 +1,14 @@
+<launch>
+  <arg name="config_file" default="airsim_single_cloud.yaml" />
+
+  <include file="$(find epic_planner)/launch/algorithm.xml">
+    <arg name="config_file" value="$(arg config_file)" />
+  </include>
+
+  <node pkg="plan_manage" name="traj_server" type="traj_server" output="screen">
+    <remap from="/position_cmd" to="/planning/pos_cmd" />
+  </node>
+
+  <include file="$(find epic_planner)/launch/simulation.launch" />
+  <!-- <include file="$(find epic_planner)/launch/rviz.launch"/> -->
+</launch>

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>gpu_visibility_checker</name>
+  <version>1.0.0</version>
+  <description>
+    Spherical binning utility for uniform direction discretization using icosahedron.
+    Provides 20-direction binning based on icosahedron face normals for directional analysis.
+  </description>
+  <maintainer email="lin@todo.todo">lin</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <!-- Minimal dependencies -->
+  <depend>eigen</depend>
+
+  <export>
+  </export>
+</package>

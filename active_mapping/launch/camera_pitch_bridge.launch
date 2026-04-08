@@ -1,0 +1,35 @@
+<launch>
+    <arg name="vehicle_name" default="drone_1"/>
+    <arg name="camera_name" default="front_center"/>
+    <arg name="pitch_topic" default="/tar_pitch_deg"/>
+    <arg name="camera_mount_x" default="0.35"/>
+    <arg name="camera_mount_y" default="0.0"/>
+    <arg name="camera_mount_z" default="-0.2"/>
+    <arg name="camera_mount_roll_deg" default="0.0"/>
+    <arg name="camera_mount_pitch_deg" default="0.0"/>
+    <arg name="camera_mount_yaw_deg" default="0.0"/>
+    <arg name="pitch_min_deg" default="-89.0"/>
+    <arg name="pitch_max_deg" default="89.0"/>
+    <arg name="pitch_sign" default="1.0"/>
+    <arg name="baseline_from_current_pose" default="true"/>
+    <arg name="pitch_speed_deg_per_sec" default="20.0"/>
+    <arg name="update_rate_hz" default="30.0"/>
+
+    <node pkg="active_mapping" type="camera_pitch_bridge.py" name="camera_pitch_bridge" output="screen">
+        <param name="vehicle_name" value="$(arg vehicle_name)"/>
+        <param name="camera_name" value="$(arg camera_name)"/>
+        <param name="pitch_topic" value="$(arg pitch_topic)"/>
+        <param name="camera_mount_x" value="$(arg camera_mount_x)"/>
+        <param name="camera_mount_y" value="$(arg camera_mount_y)"/>
+        <param name="camera_mount_z" value="$(arg camera_mount_z)"/>
+        <param name="camera_mount_roll_deg" value="$(arg camera_mount_roll_deg)"/>
+        <param name="camera_mount_pitch_deg" value="$(arg camera_mount_pitch_deg)"/>
+        <param name="camera_mount_yaw_deg" value="$(arg camera_mount_yaw_deg)"/>
+        <param name="pitch_min_deg" value="$(arg pitch_min_deg)"/>
+        <param name="pitch_max_deg" value="$(arg pitch_max_deg)"/>
+        <param name="pitch_sign" value="$(arg pitch_sign)"/>
+        <param name="baseline_from_current_pose" value="$(arg baseline_from_current_pose)"/>
+        <param name="pitch_speed_deg_per_sec" value="$(arg pitch_speed_deg_per_sec)"/>
+        <param name="update_rate_hz" value="$(arg update_rate_hz)"/>
+    </node>
+</launch>

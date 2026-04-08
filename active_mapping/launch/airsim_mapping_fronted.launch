@@ -49,7 +49,14 @@
         <remap from="rgb/camera_info"             to="/airsim/camera_info"/>
         <remap from="rgb/image_rect_color"        to="/airsim/rgb"/>
         <remap from="depth_registered/image_rect" to="/airsim/depth"/>
-        <remap from="depth_registered/points"     to="/airsim/point_cloud"/>
+        <remap from="depth_registered/points"     to="/airsim/point_cloud_raw"/>
+    </node>
+
+    <node pkg="active_mapping" type="point_cloud_sanitizer" name="point_cloud_sanitizer" output="screen">
+        <param name="input_topic" value="/airsim/point_cloud_raw"/>
+        <param name="output_topic" value="/airsim/point_cloud"/>
+        <param name="target_frame" value="world"/>
+        <param name="queue_size" value="5"/>
     </node>
 
     <node if="$(arg enable_teleop)" pkg="active_mapping" type="airsim_teleop.py" name="airsim_teleop" output="screen" />

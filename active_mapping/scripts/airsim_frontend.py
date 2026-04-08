@@ -180,6 +180,11 @@ class AirSimFrontend:
         
         self.pose_pub = rospy.Publisher('/airsim/pose', PoseStamped, queue_size=5)
         self.odom_pub = rospy.Publisher('/airsim/odom', Odometry, queue_size=5)
+        self.camera_odom_pub = rospy.Publisher('/airsim/camera_odom', Odometry, queue_size=5)
+
+        self.state_lock = threading.Lock()
+        self.latest_linear_vel_enu = np.zeros(3, dtype=np.float64)
+        self.latest_angular_vel_flu = np.zeros(3, dtype=np.float64)
 
         # 5. 连接 AirSim 仿真器
         self.state_client = self._connect_airsim_with_retry("state")
@@ -277,6 +282,33 @@ class AirSimFrontend:
         odom.twist.twist.angular.z = float(angular_vel_flu[2])
         self.odom_pub.publish(odom)
 
+        with self.state_lock:
+            self.latest_linear_vel_enu = linear_vel_enu.copy()
+            self.latest_angular_vel_flu = angular_vel_flu.copy()
+
+    def _publish_camera_odom(self, stamp, camera_pos_enu, camera_link_ori_enu):
+        with self.state_lock:
+            linear_vel_enu = self.latest_linear_vel_enu.copy()
+            angular_vel_flu = self.latest_angular_vel_flu.copy()
+
+        odom = Odometry()
+        odom.header = Header(stamp=stamp, frame_id="world")
+        odom.child_frame_id = "camera_link"
+        odom.pose.pose.position.x = float(camera_pos_enu[0])
+        odom.pose.pose.position.y = float(camera_pos_enu[1])
+        odom.pose.pose.position.z = float(camera_pos_enu[2])
+        odom.pose.pose.orientation.x = float(camera_link_ori_enu[0])
+        odom.pose.pose.orientation.y = float(camera_link_ori_enu[1])
+        odom.pose.pose.orientation.z = float(camera_link_ori_enu[2])
+        odom.pose.pose.orientation.w = float(camera_link_ori_enu[3])
+        odom.twist.twist.linear.x = float(linear_vel_enu[0])
+        odom.twist.twist.linear.y = float(linear_vel_enu[1])
+        odom.twist.twist.linear.z = float(linear_vel_enu[2])
+        odom.twist.twist.angular.x = float(angular_vel_flu[0])
+        odom.twist.twist.angular.y = float(angular_vel_flu[1])
+        odom.twist.twist.angular.z = float(angular_vel_flu[2])
+        self.camera_odom_pub.publish(odom)
+
     def _image_loop(self):
         image_period = rospy.Duration.from_sec(1.0 / self.image_freq) if self.image_freq > 0.0 else None
         if image_period is None:
@@ -353,6 +385,7 @@ class AirSimFrontend:
                 pose_msg.pose.orientation.z = float(camera_ori_enu[2])
                 pose_msg.pose.orientation.w = float(camera_ori_enu[3])
 
+                self._publish_camera_odom(now, camera_pos_enu, camera_link_ori_enu)
                 self.pose_pub.publish(pose_msg)
                 self.rgb_pub.publish(rgb_msg)
                 self.depth_pub.publish(depth_msg)

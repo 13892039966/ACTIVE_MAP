@@ -1,0 +1,92 @@
+#topic param:
+odometry_topic: /simOdometry
+cloud_topic_colored: /camera/pointcloud/colored
+cloud_topic_nocolor: /camera/pointcloud/uncolored
+
+# Data recording for COLMAP
+data_record/enable: true
+data_record/save_path: /home/daisy/workspace/EPIC_GS/colmap_data
+data_record/rgb_topic: /camera/image_raw
+data_record/position_threshold: 0.2
+data_record/angle_threshold: 10.0
+data_record/cam_fx: 147.8
+data_record/cam_fy: 147.8
+data_record/cam_cx: 256.0
+data_record/cam_cy: 256.0
+data_record/cam_width: 512
+data_record/cam_height: 512
+
+global_planning/w_vdir: 0.0
+global_planning/w_yawdir: 0.0
+global_planning/min_distance_to_obstacle: 0.4
+# Observation quality thresholds
+observation_quality/well_observed_base_score: 0.5
+observation_quality/well_observed_texture_weight: 0.5
+observation_quality/well_observed_geo_weight: 1.5
+observation_quality/voxel_size: 0.2
+global_planning/min_voxel_count: 15
+global_planning/viewpoint_sample_resolution: 0.4
+global_planning/top_n_viewpoints: 30
+fsm/replan_time_after_traj_start: 5.0
+
+#viz
+view_graph: true
+# graph
+bubble_topo/min_x: 0.8
+bubble_topo/min_y: 0.8
+bubble_topo/min_z: 0.51
+bubble_topo/bubble_min_radius: 0.65
+bubble_topo/init_region_size_x: 2.3
+bubble_topo/init_region_size_y: 2.3
+bubble_topo/init_region_size_z: 2.0
+bubble_topo/cube_discrete_size: 0.4
+bubble_astar/safe_distance: 0.31
+# map param
+max_update_region_num: 100
+lidar_perception/fov_up: 30.0
+lidar_perception/fov_down: -30.0
+lidar_perception/lidar_pitch: 0.0
+lidar_perception/fov_viewpoint_up: 30.0
+lidar_perception/fov_viewpoint_down: -30.0
+lidar_perception/max_ray_length: 15
+parallel_astar/update_connection_timeout: 0.001
+parallel_astar/insert_node_timeout: 0.002
+# area
+box_num: 1
+box_0/down: [-2.005615234375, -3.1536941528320312, -1.168869137763977]
+box_0/up: [2.394385814666748, 1.8561344146728516, 1.8229918479919434]
+dead_area_num: 1
+dead_0/down: [-0.4, -3.3, 17.8]
+dead_0/up: [8.3, 18.7, 22.8]
+max_traj_len: 10.0
+DilateRadiusSoft: 0.3 # corrido
+DilateRadiusHard: 0.2 # collision check threshold
+MaxCorridorSize: 4.0
+MaxVelMag: 0.5
+MaxTiltAngle: 1.0 # 最大飞行姿态角度 60°:1.0472 45°:0.7854 30°:0.5236 10°:0.1745
+MinThrust: 15.0
+MaxThrust: 22.0
+VehicleMass: 1.9
+GravAcc: 9.8
+HorizDrag: 0.0
+VertDrag: 0.0
+ParasDrag: 0.00
+SpeedEps: 0.0001
+WeightT: 200.0
+WeightSafeT: 200.0
+ChiVec: [5.1e+4, 1.5e+5, 1.1e+4, 1.1e+4, 1.1e+5] # [pos_weight, vel_weight, omg_weight, theta_weight, thrust_weight]
+SmoothingEps: 0.0015
+IntegralIntervs: 16
+RelCostTol: 1.1e-9
+#param for yaw opt
+yaw_max_vel: 0.7 # 角速度限制, 要大
+yaw_rho_vis: 100.0
+yaw_time_fwd: 2.5
+# pitch limits (rad)
+MAX_PITCH: 1.0472  # 10 deg
+MIN_PITCH: -1.0472 # -60 deg
+#param for collision avoidance
+rho_collision: 5000.0 # Collision penalty weight (100-500)
+safe_distance: 0.3 # Safety margin from obstacles (meters)
+collision_gradient_eps: 0.2 # Finite difference step size (meters)
+rho_path: 10.0 # Path adherence weight (A* path)

@@ -44,9 +44,18 @@ target_link_libraries(heatmap_cluster_node
   ${PCL_LIBRARIES}
 )
 
+add_executable(point_cloud_sanitizer
+  src/point_cloud_sanitizer.cpp
+)
+target_link_libraries(point_cloud_sanitizer
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+)
+
 catkin_install_python(PROGRAMS
   scripts/airsim_frontend.py
   scripts/airsim_image_saver.py
+  scripts/camera_pitch_bridge.py
   scripts/external_pose_tf_broadcaster.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
