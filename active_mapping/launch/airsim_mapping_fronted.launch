@@ -102,4 +102,5 @@
         <param name="cluster_min_size" value="$(arg cluster_min_size)"/>
         <param name="cluster_max_size" value="$(arg cluster_max_size)"/>
     </node> -->
+    <include file="$(find active_mapping)/launch/camera_pitch_bridge.launch"/>
 </launch>
